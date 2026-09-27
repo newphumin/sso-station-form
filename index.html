@@ -40,8 +40,8 @@
         
         /* ไฮไลท์ข้อมูลที่เปลี่ยนใน Modal */
         .highlight-change {
-            background-color: #dcfce7; /* พื้นหลังสีเขียวอ่อน */
-            color: #166534; /* ตัวหนังสือสีเขียวเข้ม */
+            background-color: #dcfce7;
+            color: #166534;
             font-weight: 600;
             padding: 2px 6px;
             border-radius: 4px;
@@ -60,7 +60,6 @@
                 <div>
                     <h1 class="text-xl font-bold tracking-wide">ระบบบริหารจัดการข้อมูลสถานที่เลือกตั้งผู้แทนประกันสังคม</h1>
                     <div id="userProfileDisplay" class="text-sm text-blue-200 mt-0.5 flex items-center gap-2">
-                        <!-- ชื่อผู้ใช้จะมาแสดงตรงนี้ -->
                         <i class="fa-solid fa-spinner fa-spin"></i> กำลังโหลดข้อมูลผู้ใช้...
                     </div>
                 </div>
@@ -85,7 +84,6 @@
                 <i class="fa-solid fa-filter"></i>
                 <h2 class="font-bold text-lg">เงื่อนไขการค้นหาข้อมูล</h2>
             </div>
-            <!-- สลับลำดับเป็น จังหวัด -> สปส. -> อำเภอ -->
             <div class="grid grid-cols-1 md:grid-cols-4 gap-5 mb-5">
                 <div>
                     <label class="block text-sm font-semibold text-slate-700 mb-1">จังหวัด</label>
@@ -149,11 +147,10 @@
                         <tr>
                             <th class="px-4 py-3.5 font-medium tracking-wide">พื้นที่ / สปส.</th>
                             <th class="px-4 py-3.5 font-medium tracking-wide">รหัสหน่วย</th>
-                            <!-- เปลี่ยนชื่อคอลัมน์ -->
                             <th class="px-4 py-3.5 font-medium tracking-wide border-l border-[#3b5ebf]">ชื่อสถานที่เลือกตั้ง</th>
                             <th class="px-4 py-3.5 font-medium tracking-wide border-l border-[#3b5ebf]">ที่เลือกตั้ง</th>
                             <th class="px-4 py-3.5 font-medium tracking-wide border-l border-[#3b5ebf]">URL แผนที่ (Google Maps)</th>
-                            <th class="px-4 py-3.5 font-medium tracking-wide text-center border-l border-[#3b5ebf] min-w-[100px]">จัดการ</th>
+                            <th class="px-4 py-3.5 font-medium tracking-wide text-center border-l border-[#3b5ebf] min-w-[130px]">จัดการ</th>
                         </tr>
                     </thead>
                     <tbody id="dataTableBody" class="divide-y divide-slate-200">
@@ -171,14 +168,14 @@
                 </table>
             </div>
             <div class="bg-slate-50 p-2 text-xs text-slate-500 text-center border-t border-slate-200">
-                <i class="fa-solid fa-circle-info mr-1 text-[#eab308]"></i> กดปุ่ม <b>"แก้ไข"</b> ในคอลัมน์จัดการ เพื่อปลดล็อกช่องกรอกข้อมูล
+                <i class="fa-solid fa-circle-info mr-1 text-[#eab308]"></i> กดปุ่ม <b>"แก้ไข"</b> ในคอลัมน์จัดการ เพื่อปลดล็อกช่องกรอกข้อมูล (จำกัดการแก้ไขทีละ 1 รายการ)
             </div>
         </div>
     </main>
 
-    <!-- Modal 1: User Profile Setup (ล็อกจอถ้าไม่มีข้อมูล) -->
+    <!-- Modal 1: User Profile Setup -->
     <div id="profileModal" class="hidden fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[60] flex justify-center items-center p-4">
-        <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200 animate-fade-in">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200">
             <div class="p-5 border-b bg-[#1e3a8a] text-white">
                 <h2 class="text-xl font-bold"><i class="fa-solid fa-id-badge mr-2"></i>ข้อมูลผู้ทำรายการ (โปรไฟล์)</h2>
                 <p class="text-xs text-blue-200 mt-1">กรุณาระบุข้อมูลเพื่อใช้เป็นหลักฐานประกอบการแก้ไขข้อมูลในระบบ</p>
@@ -246,7 +243,7 @@
                     </div>
                     <div class="flex gap-3">
                         <button onclick="closeConfirmModal()" class="bg-white text-slate-700 px-6 py-2.5 rounded-lg border border-slate-300 hover:bg-slate-100 font-medium shadow-sm transition">
-                            <i class="fa-solid fa-xmark mr-1"></i> ยกเลิก
+                            <i class="fa-solid fa-xmark mr-1"></i> ย้อนกลับไปแก้ไข
                         </button>
                         <button id="btnConfirmExecute" class="bg-green-600 text-white px-6 py-2.5 rounded-lg shadow-md hover:bg-green-700 transition font-bold flex items-center gap-2">
                             <i class="fa-solid fa-save"></i> ยืนยันการบันทึก
