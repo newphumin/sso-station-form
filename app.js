@@ -9,12 +9,11 @@ const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 let isSystemOpen = false;
 let stationsData = []; 
 let filterMapping = []; 
-let tambolMapping = new Map(); 
+let tambolMapping = new Map(); // เก็บความสัมพันธ์ อำเภอ -> ตำบล -> รหัสไปรษณีย์
 
 let currentUserProfile = { name: '', sso: '' };
 let pendingSaveData = null; 
 let currentlyEditingCode = null; 
-
 let pendingAdminAction = null; 
 
 // ==========================================
@@ -78,8 +77,7 @@ document.getElementById('btnAdminVerify').addEventListener('click', async () => 
 
     if (error || !data) {
         customAlert('ระบบขัดข้อง', 'ไม่พบการตั้งค่ารหัสผ่านผู้ดูแลระบบในฐานข้อมูล', 'error');
-        closeAdminAuth();
-        return;
+        closeAdminAuth(); return;
     }
 
     if (data.setting_value === pwd) {
@@ -126,7 +124,7 @@ document.getElementById('btnSaveProfile').addEventListener('click', () => {
 });
 
 // ==========================================
-// 5. โหลดข้อมูลตัวกรอง ระบบเปิด-ปิด
+// 5. โหลดข้อมูลตัวกรอง และ Mapping
 // ==========================================
 async function checkSystemStatus() {
     try {
@@ -145,62 +143,65 @@ async function checkSystemStatus() {
     } catch (err) {}
 }
 
-// ฟังก์ชัน Toggle ที่หายไป (นำกลับมาแล้ว)
 async function toggleSystemStatus() {
     const newStatus = !isSystemOpen;
-    const confirmMsg = newStatus ? 'คุณต้องการ "เปิด" ระบบรับข้อมูลใช่หรือไม่?' : 'คุณต้องการ "ปิด" ระบบรับข้อมูลใช่หรือไม่?';
-    
-    if(confirm(confirmMsg)) {
+    if(confirm(newStatus ? 'คุณต้องการ "เปิด" ระบบรับข้อมูลใช่หรือไม่?' : 'คุณต้องการ "ปิด" ระบบรับข้อมูลใช่หรือไม่?')) {
         const { data: existing } = await supabaseClient.from('system_settings_1').select('setting_name').eq('setting_name', 'is_form_open').maybeSingle();
-        
         let error;
-        if (existing) {
-            error = (await supabaseClient.from('system_settings_1').update({ is_active: newStatus }).eq('setting_name', 'is_form_open')).error;
-        } else {
-            error = (await supabaseClient.from('system_settings_1').insert([{ setting_name: 'is_form_open', is_active: newStatus }])).error;
-        }
+        if (existing) error = (await supabaseClient.from('system_settings_1').update({ is_active: newStatus }).eq('setting_name', 'is_form_open')).error;
+        else error = (await supabaseClient.from('system_settings_1').insert([{ setting_name: 'is_form_open', is_active: newStatus }])).error;
             
-        if(error) {
-            customAlert('เกิดข้อผิดพลาด', 'ไม่สามารถเปลี่ยนสถานะระบบได้: ' + error.message, 'error');
-        } else {
-            customAlert('สำเร็จ', 'เปลี่ยนสถานะระบบเรียบร้อยแล้ว', 'success');
-            checkSystemStatus();
-        }
+        if(error) customAlert('เกิดข้อผิดพลาด', 'ไม่สามารถเปลี่ยนสถานะระบบได้: ' + error.message, 'error');
+        else { customAlert('สำเร็จ', 'เปลี่ยนสถานะระบบเรียบร้อยแล้ว', 'success'); checkSystemStatus(); }
     }
 }
 
 async function loadFilterOptions() {
+    const provSelect = document.getElementById('filterProvince');
+    provSelect.innerHTML = '<option value="">-- กำลังดึงข้อมูล... --</option>';
+    provSelect.disabled = true;
+
     let allData = []; let from = 0; const step = 1000; let hasMore = true;
-    while (hasMore) {
-        const { data, error } = await supabaseClient.from('ms_station_1')
-            .select('province_code, province_name, sso_branch_code, sso_name, amphur_code, amphur_name, tambol_code, tambol_name, postal_code')
-            .order('province_code').order('sso_branch_code').order('amphur_code').range(from, from + step - 1);
-        if (error) return;
-        if (data && data.length > 0) { allData = allData.concat(data); from += step; if (data.length < step) hasMore = false; } else hasMore = false;
-    }
+    try {
+        while (hasMore) {
+            const { data, error } = await supabaseClient.from('ms_station_1')
+                .select('province_code, province_name, sso_branch_code, sso_name, amphur_code, amphur_name, tambol_code, tambol_name, postal_code')
+                .order('province_code').order('sso_branch_code').order('amphur_code').range(from, from + step - 1);
+            if (error) throw error;
+            if (data && data.length > 0) { allData = allData.concat(data); from += step; if (data.length < step) hasMore = false; } else hasMore = false;
+        }
 
-    if (allData.length > 0) {
-        filterMapping = allData; 
-        const provMap = new Map();
-        filterMapping.forEach(i => { if (i.province_code && !provMap.has(i.province_code)) provMap.set(i.province_code, `${i.province_code} - ${i.province_name}`); });
-        populateDropdown('filterProvince', Array.from(provMap, ([value, text]) => ({value, text})), '-- แสดงทุกจังหวัด --');
-        document.getElementById('filterProvince').disabled = false;
+        if (allData.length > 0) {
+            filterMapping = allData; 
+            const provMap = new Map();
+            filterMapping.forEach(i => { if (i.province_code && !provMap.has(i.province_code)) provMap.set(i.province_code, `${i.province_code} - ${i.province_name}`); });
+            populateDropdown('filterProvince', Array.from(provMap, ([value, text]) => ({value, text})), '-- แสดงทุกจังหวัด --');
+            document.getElementById('filterProvince').disabled = false;
 
-        const ssoGlobalMap = new Map();
-        filterMapping.forEach(i => { if (i.sso_branch_code && !ssoGlobalMap.has(i.sso_branch_code)) ssoGlobalMap.set(i.sso_branch_code, `${i.sso_branch_code} - ${i.sso_name}`); });
-        const profileSSOs = [{value: '1000 - ส่วนกลาง', text: '1000 - ส่วนกลาง'}];
-        Array.from(ssoGlobalMap).forEach(([v, t]) => profileSSOs.push({value: t, text: t}));
-        populateDropdown('profSSOInput', profileSSOs, '-- เลือกหน่วยงานต้นสังกัด --');
-        if(currentUserProfile.sso) document.getElementById('profSSOInput').value = currentUserProfile.sso;
+            const ssoGlobalMap = new Map();
+            filterMapping.forEach(i => { if (i.sso_branch_code && !ssoGlobalMap.has(i.sso_branch_code)) ssoGlobalMap.set(i.sso_branch_code, `${i.sso_branch_code} - ${i.sso_name}`); });
+            const profileSSOs = [{value: '1000 - ส่วนกลาง', text: '1000 - ส่วนกลาง'}];
+            Array.from(ssoGlobalMap).forEach(([v, t]) => profileSSOs.push({value: t, text: t}));
+            populateDropdown('profSSOInput', profileSSOs, '-- เลือกหน่วยงานต้นสังกัด --');
+            if(currentUserProfile.sso) document.getElementById('profSSOInput').value = currentUserProfile.sso;
 
-        tambolMapping.clear();
-        filterMapping.forEach(i => {
-            if (i.amphur_code && i.tambol_code) {
-                if (!tambolMapping.has(i.amphur_code)) tambolMapping.set(i.amphur_code, new Map());
-                const amphurTambols = tambolMapping.get(i.amphur_code);
-                if (!amphurTambols.has(i.tambol_code)) amphurTambols.set(i.tambol_code, { name: i.tambol_name, zip: i.postal_code || '' });
-            }
-        });
+            // บังคับแปลงรหัสทั้งหมดให้เป็น String ป้องกัน Type Mismatch
+            tambolMapping.clear();
+            filterMapping.forEach(i => {
+                if (i.amphur_code && i.tambol_code) {
+                    const aCodeStr = String(i.amphur_code);
+                    const tCodeStr = String(i.tambol_code);
+                    if (!tambolMapping.has(aCodeStr)) tambolMapping.set(aCodeStr, new Map());
+                    const amphurTambols = tambolMapping.get(aCodeStr);
+                    if (!amphurTambols.has(tCodeStr)) amphurTambols.set(tCodeStr, { name: i.tambol_name, zip: i.postal_code || '' });
+                }
+            });
+        } else {
+            provSelect.innerHTML = '<option value="">-- ไม่พบข้อมูลในระบบ --</option>';
+        }
+    } catch (err) {
+        provSelect.innerHTML = '<option value="">-- โหลดข้อมูลล้มเหลว --</option>';
+        customAlert('ดึงข้อมูลล้มเหลว', 'โปรดตรวจสอบการเชื่อมต่อฐานข้อมูล\n' + err.message, 'error');
     }
 }
 
@@ -212,7 +213,6 @@ function populateDropdown(elementId, items, defaultText) {
 
 function setupDropdownEvents() {
     const pSel = document.getElementById('filterProvince'); const sSel = document.getElementById('filterSSO'); const aSel = document.getElementById('filterAmphur');
-
     pSel.addEventListener('change', (e) => {
         sSel.innerHTML = '<option value="">-- แสดงทุกสำนักงาน --</option>'; sSel.disabled = true;
         aSel.innerHTML = '<option value="">-- แสดงทุกอำเภอ --</option>'; aSel.disabled = true;
@@ -276,11 +276,13 @@ function renderTable(data) {
         const tr = document.createElement('tr');
         tr.className = 'hover:bg-slate-50 transition border-b border-slate-100 relative';
         
+        // สร้าง Dropdown ตำบล โดยใช้ String บังคับ Type
+        const aCodeStr = String(row.amphur_code);
         let tambolOptionsHTML = `<option value="">-- เลือกตำบล --</option>`;
-        if (tambolMapping.has(row.amphur_code)) {
-            const tMap = tambolMapping.get(row.amphur_code);
+        if (tambolMapping.has(aCodeStr)) {
+            const tMap = tambolMapping.get(aCodeStr);
             Array.from(tMap.entries()).forEach(([tCode, tData]) => {
-                const selected = (row.tambol_code == tCode) ? 'selected' : '';
+                const selected = (String(row.tambol_code) === tCode) ? 'selected' : '';
                 tambolOptionsHTML += `<option value="${tCode}" ${selected}>${tCode} - ${tData.name}</option>`;
             });
         }
@@ -296,7 +298,8 @@ function renderTable(data) {
             <td class="px-2 py-2"><input type="text" id="addr_${row.polling_station_code}" class="w-full p-2 rounded editable-input text-slate-800" value="${row.address || ''}" disabled></td>
             
             <td class="px-2 py-2">
-                <select id="tam_${row.polling_station_code}" class="w-full p-2 rounded editable-input text-slate-800 appearance-none" disabled onchange="updateZipCode('${row.polling_station_code}', ${row.amphur_code})">
+                <!-- สังเกตส่งพารามิเตอร์เป็น String เสมอ -->
+                <select id="tam_${row.polling_station_code}" class="w-full p-2 rounded editable-input text-slate-800 appearance-none" disabled onchange="updateZipCode('${row.polling_station_code}', '${row.amphur_code}')">
                     ${tambolOptionsHTML}
                 </select>
             </td>
@@ -322,12 +325,15 @@ function renderTable(data) {
 }
 
 function updateZipCode(code, amphurCode) {
-    const selectedTamCode = document.getElementById(`tam_${code}`).value;
+    const selectedTamCode = document.getElementById(`tam_${code}`).value; // อันนี้คือ String
     const zipInput = document.getElementById(`zip_${code}`);
-    if (selectedTamCode && tambolMapping.has(amphurCode)) {
-        const tMap = tambolMapping.get(amphurCode);
-        if (tMap.has(parseInt(selectedTamCode))) zipInput.value = tMap.get(parseInt(selectedTamCode)).zip;
-        else zipInput.value = '';
+    const aCodeStr = String(amphurCode); // ป้องกันบั๊ก
+
+    if (selectedTamCode && tambolMapping.has(aCodeStr)) {
+        const tMap = tambolMapping.get(aCodeStr);
+        if (tMap.has(selectedTamCode)) {
+            zipInput.value = tMap.get(selectedTamCode).zip;
+        } else zipInput.value = '';
     } else zipInput.value = '';
 }
 
@@ -346,8 +352,8 @@ function enableEdit(code) {
     });
     
     document.getElementById(`zip_${code}`).classList.add('bg-slate-100', 'border-yellow-300', 'text-slate-800');
-    
     document.getElementById(`btn_edit_${code}`).classList.add('hidden');
+    
     const actionGroup = document.getElementById(`action_group_${code}`);
     actionGroup.classList.remove('hidden'); actionGroup.classList.add('flex');
     document.getElementById(ids[0]).focus();
@@ -389,13 +395,14 @@ function prepareSaveData(code, index) {
     const newUrl = document.getElementById(`url_${code}`).value.trim();
 
     let newTamName = '';
-    if (newTamCode && tambolMapping.has(oldData.amphur_code)) {
-        const tMap = tambolMapping.get(oldData.amphur_code);
-        if (tMap.has(parseInt(newTamCode))) newTamName = tMap.get(parseInt(newTamCode)).name;
+    const aCodeStr = String(oldData.amphur_code);
+    if (newTamCode && tambolMapping.has(aCodeStr)) {
+        const tMap = tambolMapping.get(aCodeStr);
+        if (tMap.has(newTamCode)) newTamName = tMap.get(newTamCode).name;
     }
 
     if (oldData.polling_station_name === newName && oldData.location_name === newLoc && oldData.location_url === newUrl && 
-        oldData.address === newAddr && oldData.tambol_code == newTamCode && oldData.postal_code === newZip) {
+        oldData.address === newAddr && String(oldData.tambol_code) === newTamCode && oldData.postal_code === newZip) {
         customAlert('ข้อมูลไม่เปลี่ยนแปลง', 'คุณยังไม่ได้แก้ไขข้อมูลใดๆ ในแถวนี้', 'info');
         return;
     }
