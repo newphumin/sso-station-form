@@ -20,7 +20,7 @@ let currentlyEditingCode = null;
 let pendingAdminAction = null; 
 
 // ==========================================
-// 3. ฟังก์ชัน Custom Alerts
+// 3. ฟังก์ชัน Custom Alerts & Confirm
 // ==========================================
 function customAlert(title, message, type = 'info') {
     const modal = document.getElementById('customAlertModal');
@@ -53,6 +53,39 @@ function customAlert(title, message, type = 'info') {
     modal.classList.remove('hidden');
 }
 
+// ฟังก์ชันยืนยันใหม่ (แทนที่ window.confirm)
+function customConfirm(title, message, callbackOk) {
+    const modal = document.getElementById('customConfirmModal');
+    if (!modal) {
+        if(confirm(message)) callbackOk();
+        return;
+    }
+    
+    document.getElementById('confirmTitle').innerText = title;
+    document.getElementById('confirmMessage').innerText = message;
+    
+    const btnOk = document.getElementById('btnConfirmOk');
+    const btnCancel = document.getElementById('btnConfirmCancel');
+    
+    // ล้าง Event เดิมป้องกันการทำงานซ้ำซ้อน
+    const newBtnOk = btnOk.cloneNode(true);
+    const newBtnCancel = btnCancel.cloneNode(true);
+    btnOk.parentNode.replaceChild(newBtnOk, btnOk);
+    btnCancel.parentNode.replaceChild(newBtnCancel, btnCancel);
+    
+    newBtnOk.addEventListener('click', () => {
+        modal.classList.add('hidden');
+        callbackOk();
+    });
+    
+    newBtnCancel.addEventListener('click', () => {
+        modal.classList.add('hidden');
+    });
+    
+    modal.classList.remove('hidden');
+}
+
+
 // ==========================================
 // 4. ฟังก์ชัน Admin Authentication
 // ==========================================
@@ -62,7 +95,7 @@ function requireAdminAuth(actionCallback) {
     
     if (!pwdInput || !modal) return;
     
-    pendingAdminAction = actionCallback; // เก็บฟังก์ชันที่ต้องทำเอาไว้
+    pendingAdminAction = actionCallback; 
     pwdInput.value = '';
     modal.classList.remove('hidden');
     pwdInput.focus();
@@ -71,7 +104,7 @@ function requireAdminAuth(actionCallback) {
 function closeAdminAuth() {
     const modal = document.getElementById('adminAuthModal');
     if(modal) modal.classList.add('hidden');
-    pendingAdminAction = null; // เมื่อสั่งปิด จะล้างค่าที่ค้างอยู่
+    pendingAdminAction = null; 
 }
 
 async function verifyAdminPassword() {
@@ -92,10 +125,9 @@ async function verifyAdminPassword() {
     }
 
     if (data.setting_value === pwd) {
-        // [จุดที่แก้ไขบั๊ก] ต้องสำเนาคำสั่งออกมาก่อนสั่งปิด Modal
         const actionToExecute = pendingAdminAction; 
-        closeAdminAuth(); // คำสั่งนี้จะเคลียร์ pendingAdminAction ทิ้ง
-        if (actionToExecute) actionToExecute(); // รันคำสั่งที่สำเนาไว้
+        closeAdminAuth(); 
+        if (actionToExecute) actionToExecute(); 
     } else {
         customAlert('ปฏิเสธการเข้าถึง', 'รหัสผ่านไม่ถูกต้อง', 'error');
         pwdInput.value = '';
@@ -160,9 +192,13 @@ async function checkSystemStatus() {
     } catch (err) { console.error('Error checking system status:', err); }
 }
 
+// อัปเดตฟังก์ชันนี้ไปใช้ customConfirm
 async function toggleSystemStatus() {
     const newStatus = !isSystemOpen;
-    if(confirm(newStatus ? 'ยืนยันการตั้งค่า: คุณต้องการ "เปิด" ระบบรับข้อมูลใช่หรือไม่?' : 'ยืนยันการตั้งค่า: คุณต้องการ "ปิด" ระบบรับข้อมูลใช่หรือไม่?')) {
+    const title = 'ยืนยันการตั้งค่า';
+    const msg = newStatus ? 'คุณต้องการ "เปิด" ระบบรับข้อมูลใช่หรือไม่?' : 'คุณต้องการ "ปิด" ระบบรับข้อมูลใช่หรือไม่?';
+
+    customConfirm(title, msg, async () => {
         const { data: existing } = await supabaseClient.from('system_settings_1').select('setting_name').eq('setting_name', 'is_form_open').maybeSingle();
         let error;
         if (existing) error = (await supabaseClient.from('system_settings_1').update({ is_active: newStatus }).eq('setting_name', 'is_form_open')).error;
@@ -174,13 +210,12 @@ async function toggleSystemStatus() {
             customAlert('สำเร็จ', `เปลี่ยนสถานะเป็น ${newStatus ? 'เปิด' : 'ปิด'}ระบบ เรียบร้อยแล้ว`, 'success'); 
             checkSystemStatus(); 
 
-            // หากแอดมินปิดระบบ ให้บังคับล็อกบรรทัดที่พนักงานเปิดแก้ไขค้างไว้อยู่ทันที
             if (!newStatus && currentlyEditingCode !== null) {
                 const idx = stationsData.findIndex(row => row.polling_station_code == currentlyEditingCode);
                 if (idx !== -1) cancelEdit(currentlyEditingCode, idx);
             }
         }
-    }
+    });
 }
 
 async function loadTambolMaster() {
@@ -595,22 +630,18 @@ function openExportModalFlow() {
 // ==========================================
 window.addEventListener('DOMContentLoaded', () => {
     
-    // โหลดข้อมูลเบื้องต้น
     loadUserProfile();
     checkSystemStatus();
     loadFilterOptions();
     loadTambolMaster();
     setupDropdownEvents();
 
-    // 1. ปุ่มบันทึกโปรไฟล์
     const btnSaveProfile = document.getElementById('btnSaveProfile');
     if(btnSaveProfile) btnSaveProfile.addEventListener('click', saveUserProfile);
 
-    // 2. ยืนยันรหัสผ่าน Admin
     const btnAdminVerify = document.getElementById('btnAdminVerify');
     if(btnAdminVerify) btnAdminVerify.addEventListener('click', verifyAdminPassword);
     
-    // 2.1 เพิ่มฟีเจอร์กด Enter ในช่องรหัสผ่าน Admin
     const adminPwdInput = document.getElementById('adminPasswordInput');
     if(adminPwdInput) {
         adminPwdInput.addEventListener('keypress', (e) => {
@@ -618,14 +649,12 @@ window.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // 3. ปุ่มค้นหา
     const btnSearch = document.getElementById('btnSearch');
     if(btnSearch) btnSearch.addEventListener('click', searchData);
     
     const searchInput = document.getElementById('searchInput');
     if(searchInput) searchInput.addEventListener('keypress', (e) => { if(e.key === 'Enter') searchData(); });
 
-    // 4. ปุ่มล้างค่าค้นหา
     const btnClear = document.getElementById('btnClear');
     if(btnClear) {
         btnClear.addEventListener('click', () => {
@@ -639,22 +668,18 @@ window.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // 5. ปุ่ม Admin (เปิด/ปิดระบบ)
     const toggleBtn = document.getElementById('btnToggleSystem');
     if(toggleBtn) { 
         toggleBtn.classList.remove('hidden'); 
         toggleBtn.addEventListener('click', () => requireAdminAuth(toggleSystemStatus)); 
     }
     
-    // 6. ปุ่มดูประวัติ
     const btnHistory = document.getElementById('btnHistory');
     if(btnHistory) btnHistory.addEventListener('click', openHistoryModal);
     
-    // 7. ปุ่ม Export Script
     const btnExport = document.getElementById('btnExport');
     if(btnExport) btnExport.addEventListener('click', openExportModalFlow);
 
-    // 8. ปุ่มดาวน์โหลดไฟล์ .sql
     const btnDownloadSQL = document.getElementById('btnDownloadSQL');
     if(btnDownloadSQL) {
         btnDownloadSQL.addEventListener('click', () => {
@@ -667,7 +692,6 @@ window.addEventListener('DOMContentLoaded', () => {
         });
     }
     
-    // 9. ปุ่มยืนยันการบันทึก
     const btnConfirmExecute = document.getElementById('btnConfirmExecute');
     if(btnConfirmExecute) btnConfirmExecute.addEventListener('click', executeSaveData);
 });
