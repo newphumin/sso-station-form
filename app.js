@@ -478,7 +478,10 @@ function renderTable(data, startIndex) {
 
         tr.innerHTML = `
             <td class="px-3 py-3 text-slate-600 text-xs whitespace-normal break-words">${row.province_code || ''} - ${row.province_name || '-'} > ${row.amphur_name || '-'}<br><span class="font-semibold text-slate-800">${row.sso_branch_code || ''} - ${row.sso_name || '-'}</span></td>
-            <td class="px-2 py-3 font-semibold text-[#1e3a8a] whitespace-nowrap">${row.polling_station_code}</td>
+            
+            <!-- [แก้ไข] จัดให้รหัสหน่วยอยู่กึ่งกลาง เพื่อความสวยงาม -->
+            <td class="px-2 py-3 font-semibold text-[#1e3a8a] whitespace-nowrap text-center">${row.polling_station_code}</td>
+            
             <td class="px-2 py-2"><input type="text" id="name_${row.polling_station_code}" class="w-full min-w-0 p-2 rounded editable-input text-slate-800 font-medium" value="${row.polling_station_name || ''}" disabled></td>
             <td class="px-2 py-2"><input type="text" id="loc_${row.polling_station_code}" class="w-full min-w-0 p-2 rounded editable-input text-slate-800" value="${row.location_name || ''}" disabled></td>
             <td class="px-2 py-2"><input type="text" id="addr_${row.polling_station_code}" class="w-full min-w-0 p-2 rounded editable-input text-slate-800" value="${row.address || ''}" disabled></td>
