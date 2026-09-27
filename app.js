@@ -9,17 +9,16 @@ const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 let isSystemOpen = false;
 let stationsData = []; 
 let filterMapping = []; 
-let tambolMapping = new Map(); // เก็บความสัมพันธ์ อำเภอ -> ตำบล -> รหัสไปรษณีย์
+let tambolMapping = new Map(); 
 
 let currentUserProfile = { name: '', sso: '' };
 let pendingSaveData = null; 
 let currentlyEditingCode = null; 
 
-// ตัวแปรเก็บ Callback สำหรับ Admin Auth
 let pendingAdminAction = null; 
 
 // ==========================================
-// 2. Custom Alerts (แทนที่ window.alert)
+// 2. Custom Alerts
 // ==========================================
 function customAlert(title, message, type = 'info') {
     const modal = document.getElementById('customAlertModal');
@@ -73,7 +72,6 @@ document.getElementById('btnAdminVerify').addEventListener('click', async () => 
     const btn = document.getElementById('btnAdminVerify');
     btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> ตรวจสอบ...';
 
-    // เช็ครหัสผ่านจาก Database
     const { data, error } = await supabaseClient.from('system_settings_1').select('setting_value').eq('setting_name', 'admin_auth').maybeSingle();
     
     btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-unlock-keyhole"></i> ยืนยันรหัสผ่าน';
@@ -86,12 +84,11 @@ document.getElementById('btnAdminVerify').addEventListener('click', async () => 
 
     if (data.setting_value === pwd) {
         closeAdminAuth();
-        if (pendingAdminAction) pendingAdminAction(); // รันคำสั่งที่รอไว้
+        if (pendingAdminAction) pendingAdminAction(); 
     } else {
         customAlert('ปฏิเสธการเข้าถึง', 'รหัสผ่านไม่ถูกต้อง', 'error');
     }
 });
-
 
 // ==========================================
 // 4. ระบบ User Profile
@@ -129,7 +126,7 @@ document.getElementById('btnSaveProfile').addEventListener('click', () => {
 });
 
 // ==========================================
-// 5. โหลดข้อมูลตัวกรอง และ Mapping ตำบล
+// 5. โหลดข้อมูลตัวกรอง ระบบเปิด-ปิด
 // ==========================================
 async function checkSystemStatus() {
     try {
@@ -148,73 +145,62 @@ async function checkSystemStatus() {
     } catch (err) {}
 }
 
-// ==========================================
-// 5. โหลดข้อมูลตัวกรอง และ Mapping ตำบล
-// ==========================================
-async function loadFilterOptions() {
-    const provSelect = document.getElementById('filterProvince');
-    provSelect.innerHTML = '<option value="">-- กำลังดึงข้อมูล... --</option>';
-    provSelect.disabled = true;
-
-    let allData = []; 
-    let from = 0; 
-    const step = 1000; 
-    let hasMore = true;
-
-    try {
-        while (hasMore) {
-            // เพิ่มการดึง tambol, postal_code และ address มาด้วย
-            const { data, error } = await supabaseClient.from('ms_station_1')
-                .select('province_code, province_name, sso_branch_code, sso_name, amphur_code, amphur_name, tambol_code, tambol_name, postal_code')
-                .order('province_code').order('sso_branch_code').order('amphur_code')
-                .range(from, from + step - 1);
-            
-            if (error) throw error; // โยน Error เข้า Catch ทันทีหากติด RLS
-            
-            if (data && data.length > 0) { 
-                allData = allData.concat(data); 
-                from += step; 
-                if (data.length < step) hasMore = false; 
-            } else {
-                hasMore = false;
-            }
-        }
-
-        if (allData.length > 0) {
-            filterMapping = allData; 
-            
-            // กรองจังหวัด
-            const provMap = new Map();
-            filterMapping.forEach(i => { if (i.province_code && !provMap.has(i.province_code)) provMap.set(i.province_code, `${i.province_code} - ${i.province_name}`); });
-            populateDropdown('filterProvince', Array.from(provMap, ([value, text]) => ({value, text})), '-- แสดงทุกจังหวัด --');
-            document.getElementById('filterProvince').disabled = false;
-
-            // กรอง สปส.
-            const ssoGlobalMap = new Map();
-            filterMapping.forEach(i => { if (i.sso_branch_code && !ssoGlobalMap.has(i.sso_branch_code)) ssoGlobalMap.set(i.sso_branch_code, `${i.sso_branch_code} - ${i.sso_name}`); });
-            const profileSSOs = [{value: '1000 - ส่วนกลาง', text: '1000 - ส่วนกลาง'}];
-            Array.from(ssoGlobalMap).forEach(([v, t]) => profileSSOs.push({value: t, text: t}));
-            populateDropdown('profSSOInput', profileSSOs, '-- เลือกหน่วยงานต้นสังกัด --');
-            if(currentUserProfile.sso) document.getElementById('profSSOInput').value = currentUserProfile.sso;
-
-            // สร้าง Mapping โครงสร้าง ตำบลและรหัสไปรษณีย์ (จัดกลุ่มตามรหัสอำเภอ)
-            tambolMapping.clear();
-            filterMapping.forEach(i => {
-                if (i.amphur_code && i.tambol_code) {
-                    if (!tambolMapping.has(i.amphur_code)) tambolMapping.set(i.amphur_code, new Map());
-                    const amphurTambols = tambolMapping.get(i.amphur_code);
-                    if (!amphurTambols.has(i.tambol_code)) {
-                        amphurTambols.set(i.tambol_code, { name: i.tambol_name, zip: i.postal_code || '' });
-                    }
-                }
-            });
+// ฟังก์ชัน Toggle ที่หายไป (นำกลับมาแล้ว)
+async function toggleSystemStatus() {
+    const newStatus = !isSystemOpen;
+    const confirmMsg = newStatus ? 'คุณต้องการ "เปิด" ระบบรับข้อมูลใช่หรือไม่?' : 'คุณต้องการ "ปิด" ระบบรับข้อมูลใช่หรือไม่?';
+    
+    if(confirm(confirmMsg)) {
+        const { data: existing } = await supabaseClient.from('system_settings_1').select('setting_name').eq('setting_name', 'is_form_open').maybeSingle();
+        
+        let error;
+        if (existing) {
+            error = (await supabaseClient.from('system_settings_1').update({ is_active: newStatus }).eq('setting_name', 'is_form_open')).error;
         } else {
-            provSelect.innerHTML = '<option value="">-- ไม่พบข้อมูลในระบบ (ตารางว่าง) --</option>';
+            error = (await supabaseClient.from('system_settings_1').insert([{ setting_name: 'is_form_open', is_active: newStatus }])).error;
         }
-    } catch (err) {
-        console.error('Error Loading Filters:', err);
-        provSelect.innerHTML = '<option value="">-- โหลดข้อมูลล้มเหลว --</option>';
-        customAlert('ดึงข้อมูลล้มเหลว', 'โปรดตรวจสอบว่าได้ทำการ Disable RLS ในตาราง ms_station_1 หรือยัง\nรายละเอียด: ' + err.message, 'error');
+            
+        if(error) {
+            customAlert('เกิดข้อผิดพลาด', 'ไม่สามารถเปลี่ยนสถานะระบบได้: ' + error.message, 'error');
+        } else {
+            customAlert('สำเร็จ', 'เปลี่ยนสถานะระบบเรียบร้อยแล้ว', 'success');
+            checkSystemStatus();
+        }
+    }
+}
+
+async function loadFilterOptions() {
+    let allData = []; let from = 0; const step = 1000; let hasMore = true;
+    while (hasMore) {
+        const { data, error } = await supabaseClient.from('ms_station_1')
+            .select('province_code, province_name, sso_branch_code, sso_name, amphur_code, amphur_name, tambol_code, tambol_name, postal_code')
+            .order('province_code').order('sso_branch_code').order('amphur_code').range(from, from + step - 1);
+        if (error) return;
+        if (data && data.length > 0) { allData = allData.concat(data); from += step; if (data.length < step) hasMore = false; } else hasMore = false;
+    }
+
+    if (allData.length > 0) {
+        filterMapping = allData; 
+        const provMap = new Map();
+        filterMapping.forEach(i => { if (i.province_code && !provMap.has(i.province_code)) provMap.set(i.province_code, `${i.province_code} - ${i.province_name}`); });
+        populateDropdown('filterProvince', Array.from(provMap, ([value, text]) => ({value, text})), '-- แสดงทุกจังหวัด --');
+        document.getElementById('filterProvince').disabled = false;
+
+        const ssoGlobalMap = new Map();
+        filterMapping.forEach(i => { if (i.sso_branch_code && !ssoGlobalMap.has(i.sso_branch_code)) ssoGlobalMap.set(i.sso_branch_code, `${i.sso_branch_code} - ${i.sso_name}`); });
+        const profileSSOs = [{value: '1000 - ส่วนกลาง', text: '1000 - ส่วนกลาง'}];
+        Array.from(ssoGlobalMap).forEach(([v, t]) => profileSSOs.push({value: t, text: t}));
+        populateDropdown('profSSOInput', profileSSOs, '-- เลือกหน่วยงานต้นสังกัด --');
+        if(currentUserProfile.sso) document.getElementById('profSSOInput').value = currentUserProfile.sso;
+
+        tambolMapping.clear();
+        filterMapping.forEach(i => {
+            if (i.amphur_code && i.tambol_code) {
+                if (!tambolMapping.has(i.amphur_code)) tambolMapping.set(i.amphur_code, new Map());
+                const amphurTambols = tambolMapping.get(i.amphur_code);
+                if (!amphurTambols.has(i.tambol_code)) amphurTambols.set(i.tambol_code, { name: i.tambol_name, zip: i.postal_code || '' });
+            }
+        });
     }
 }
 
@@ -290,7 +276,6 @@ function renderTable(data) {
         const tr = document.createElement('tr');
         tr.className = 'hover:bg-slate-50 transition border-b border-slate-100 relative';
         
-        // หาตัวเลือกตำบลสำหรับอำเภอนี้
         let tambolOptionsHTML = `<option value="">-- เลือกตำบล --</option>`;
         if (tambolMapping.has(row.amphur_code)) {
             const tMap = tambolMapping.get(row.amphur_code);
@@ -315,8 +300,7 @@ function renderTable(data) {
                     ${tambolOptionsHTML}
                 </select>
             </td>
-            <td class="px-2 py-2"><input type="text" id="zip_${row.polling_station_code}" class="w-full p-2 rounded editable-input text-slate-500 bg-slate-100/50 text-center" value="${row.postal_code || ''}" readonly disabled title="อัปเดตอัตโนมัติเมื่อเลือกตำบล"></td>
-            
+            <td class="px-2 py-2"><input type="text" id="zip_${row.polling_station_code}" class="w-full p-2 rounded editable-input text-slate-500 bg-slate-100/50 text-center" value="${row.postal_code || ''}" readonly disabled></td>
             <td class="px-2 py-2"><input type="text" id="url_${row.polling_station_code}" class="w-full p-2 rounded editable-input text-blue-600" value="${row.location_url || ''}" disabled></td>
             
             <td class="px-3 py-3 text-center min-w-[120px] border-l align-middle bg-white">
@@ -337,36 +321,30 @@ function renderTable(data) {
     });
 }
 
-// Auto-fill รหัสไปรษณีย์
 function updateZipCode(code, amphurCode) {
     const selectedTamCode = document.getElementById(`tam_${code}`).value;
     const zipInput = document.getElementById(`zip_${code}`);
     if (selectedTamCode && tambolMapping.has(amphurCode)) {
         const tMap = tambolMapping.get(amphurCode);
-        if (tMap.has(parseInt(selectedTamCode))) {
-            zipInput.value = tMap.get(parseInt(selectedTamCode)).zip;
-        } else zipInput.value = '';
+        if (tMap.has(parseInt(selectedTamCode))) zipInput.value = tMap.get(parseInt(selectedTamCode)).zip;
+        else zipInput.value = '';
     } else zipInput.value = '';
 }
 
-// ----------------------------------------------------
-// ระบบล็อคการแก้ไข (State Locking)
-// ----------------------------------------------------
 function enableEdit(code) {
-    if (!isSystemOpen) { customAlert('ไม่อนุญาต', 'ระบบปิดรับข้อมูลแล้ว', 'error'); return; }
+    if (!isSystemOpen) { customAlert('ไม่อนุญาต', 'ระบบปิดรับข้อมูลแล้ว ไม่สามารถแก้ไขได้', 'error'); return; }
     if (currentlyEditingCode !== null && currentlyEditingCode !== code) {
         customAlert('แจ้งเตือน', `กรุณาบันทึกหรือยกเลิกแถวรหัส ${currentlyEditingCode} ให้เสร็จสิ้นก่อน`, 'warning'); return;
     }
     currentlyEditingCode = code; 
     
-    const ids = [`name_${code}`, `loc_${code}`, `addr_${code}`, `tam_${code}`, `url_${code}`]; // ไม่เอา zip เพราะ readonly
+    const ids = [`name_${code}`, `loc_${code}`, `addr_${code}`, `tam_${code}`, `url_${code}`]; 
     ids.forEach(id => {
         const el = document.getElementById(id);
         el.disabled = false;
         el.classList.add('bg-yellow-50', 'border-yellow-300');
     });
     
-    // ไฮไลท์ zip เป็นพิเศษ
     document.getElementById(`zip_${code}`).classList.add('bg-slate-100', 'border-yellow-300', 'text-slate-800');
     
     document.getElementById(`btn_edit_${code}`).classList.add('hidden');
@@ -397,9 +375,8 @@ function cancelEdit(code, index) {
     currentlyEditingCode = null; 
 }
 
-
 // ==========================================
-// 7. ระบบตรวจสอบและบันทึกข้อมูล (Confirmation Modal)
+// 7. Confirmation Modal & Save
 // ==========================================
 function prepareSaveData(code, index) {
     if (!isSystemOpen) return;
@@ -411,7 +388,6 @@ function prepareSaveData(code, index) {
     const newZip = document.getElementById(`zip_${code}`).value.trim();
     const newUrl = document.getElementById(`url_${code}`).value.trim();
 
-    // หารหัสและชื่อตำบล
     let newTamName = '';
     if (newTamCode && tambolMapping.has(oldData.amphur_code)) {
         const tMap = tambolMapping.get(oldData.amphur_code);
@@ -431,7 +407,6 @@ function prepareSaveData(code, index) {
     setConfirmRow('Loc', oldData.location_name, newLoc);
     setConfirmRow('Addr', oldData.address, newAddr);
     
-    // แปลงรหัสเป็นชื่อสำหรับแสดงผลตำบล
     const oldTamDisplay = oldData.tambol_code ? `${oldData.tambol_code} - ${oldData.tambol_name}` : '';
     const newTamDisplay = newTamCode ? `${newTamCode} - ${newTamName}` : '';
     setConfirmRow('Tam', oldTamDisplay, newTamDisplay);
@@ -459,12 +434,10 @@ document.getElementById('btnConfirmExecute').addEventListener('click', async () 
     
     btnEx.disabled = true; btnEx.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> กำลังบันทึก...';
 
-    // *** SCRIPT UPDATE ไปที่ตาราง ms_polling_station ***
     const tamCodeSQL = newTamCode ? newTamCode : 'NULL';
     const sqlScript = `UPDATE ms_polling_station SET polling_station_name = '${escapeSQL(newName)}', location_name = '${escapeSQL(newLoc)}', address = '${escapeSQL(newAddr)}', tambol_code = ${tamCodeSQL}, tambol_name = '${escapeSQL(newTamName)}', postal_code = '${escapeSQL(newZip)}', location_url = '${escapeSQL(newUrl)}' WHERE polling_station_code = ${code};`;
     const signature = `${currentUserProfile.name} [${currentUserProfile.sso}]`;
 
-    // อัปเดตตารางพักข้อมูล ms_station_1
     const { error: updateError } = await supabaseClient.from('ms_station_1')
         .update({ polling_station_name: newName, location_name: newLoc, address: newAddr, tambol_code: newTamCode || null, tambol_name: newTamName, postal_code: newZip, location_url: newUrl })
         .eq('polling_station_code', code);
@@ -505,9 +478,8 @@ document.getElementById('btnConfirmExecute').addEventListener('click', async () 
 
 function escapeSQL(val) { return !val ? '' : val.replace(/'/g, "''"); }
 
-
 // ==========================================
-// 8. ประวัติ (History) และ Export (Script Deduplication)
+// 8. ประวัติ (History) และ Export
 // ==========================================
 async function openHistoryModal() {
     document.getElementById('historyModal').classList.remove('hidden');
