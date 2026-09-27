@@ -463,10 +463,9 @@ async function executeSaveData() {
 }
 
 // ==========================================
-// 10. ระบบ Export Excel (ฟีเจอร์ใหม่)
+// 10. ระบบ Export Excel (แก้บั๊ก Type Mismatch)
 // ==========================================
 function openExcelModalFlow() {
-    // โหลดตัวกรองให้ Modal Excel ก่อนแสดงผล
     const pSel = document.getElementById('excelFilterProvince');
     if(pSel && pSel.options.length <= 1 && filterMapping.length > 0) {
         const provMap = new Map();
@@ -474,7 +473,6 @@ function openExcelModalFlow() {
         populateDropdown('excelFilterProvince', Array.from(provMap, ([value, text]) => ({value, text})), '-- ทุกจังหวัด --');
     }
     
-    // ตั้งค่า Event เปลี่ยนจังหวัด -> สปส. -> อำเภอ ให้หน้าต่าง Excel
     const exPSel = document.getElementById('excelFilterProvince'); const exSSel = document.getElementById('excelFilterSSO'); const exASel = document.getElementById('excelFilterAmphur');
     if(exPSel && !exPSel.hasAttribute('data-event-bound')) {
         exPSel.addEventListener('change', (e) => {
@@ -512,7 +510,7 @@ async function executeExcelExport() {
         const s = document.getElementById('excelFilterSSO').value;
         const a = document.getElementById('excelFilterAmphur').value;
 
-        // 1. ดึงข้อมูล Master Stations ตามตัวกรอง
+        // 1. ดึงข้อมูล Master Stations
         let q = supabaseClient.from('ms_station_1').select('polling_station_code, province_name, amphur_name, sso_name');
         if (p) q = q.eq('province_code', p);
         if (s) q = q.eq('sso_branch_code', s);
@@ -520,24 +518,30 @@ async function executeExcelExport() {
         const { data: stations, error: err1 } = await q;
         if (err1) throw err1;
 
-        // 2. ดึงประวัติ Logs ทั้งหมดมา Deduplicate เพื่อหาข้อมูลอัปเดตล่าสุด
+        // 2. ดึงประวัติ Logs ทั้งหมด (เรียงตามเวลา เก่า -> ใหม่)
         const { data: logs, error: err2 } = await supabaseClient.from('station_update_logs').select('*').order('updated_at', { ascending: true });
         if (err2) throw err2;
 
+        // [จุดที่แก้บั๊ก] บังคับแปลงรหัสเป็น String เสมอ
         const latestLogs = new Map();
-        logs.forEach(log => latestLogs.set(String(log.polling_station_code), log));
+        logs.forEach(log => {
+            // สำคัญมาก: แปลงรหัสให้อยู่ในรูป String เพื่อป้องกัน Type Mismatch
+            latestLogs.set(String(log.polling_station_code), log);
+        });
 
-        // 3. นำข้อมูลที่กรองมาจับคู่กับ Log ที่ถูกแก้ไขแล้ว
+        // 3. จับคู่ข้อมูล
         const excelData = [];
         stations.forEach(st => {
+            // แปลงรหัสจากตาราง ms_station_1 ให้เป็น String เพื่อใช้ค้นหาใน Map
             const codeStr = String(st.polling_station_code);
+            
             if (latestLogs.has(codeStr)) {
                 const log = latestLogs.get(codeStr);
                 excelData.push({
                     "จังหวัด": st.province_name || '',
                     "อำเภอ": st.amphur_name || '',
                     "สปส.": st.sso_name || '',
-                    "รหัสหน่วย": st.polling_station_code,
+                    "รหัสหน่วย": codeStr,
                     "ชื่อสถานที่เลือกตั้ง": log.new_station_name || '',
                     "ที่เลือกตั้ง": log.new_location_name || '',
                     "ที่อยู่": log.new_address || '',
@@ -554,22 +558,16 @@ async function executeExcelExport() {
             return;
         }
 
-        // 4. ใช้ SheetJS สร้างไฟล์ Excel
+        // 4. สร้าง Excel
         const worksheet = XLSX.utils.json_to_sheet(excelData);
-        
-        // ปรับความกว้างคอลัมน์ให้อ่านง่าย
-        const wscols = [
-            {wch: 15}, {wch: 15}, {wch: 30}, {wch: 12}, {wch: 30}, 
-            {wch: 30}, {wch: 25}, {wch: 20}, {wch: 10}, {wch: 40}
-        ];
+        const wscols = [{wch: 15}, {wch: 15}, {wch: 30}, {wch: 12}, {wch: 30}, {wch: 30}, {wch: 25}, {wch: 20}, {wch: 10}, {wch: 40}];
         worksheet['!cols'] = wscols;
 
         const workbook = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(workbook, worksheet, "Updated_Stations");
         
         const dateStr = new Date().toISOString().slice(0,10);
-        let fileName = `SSO_Updated_Stations_${dateStr}.xlsx`;
-        XLSX.writeFile(workbook, fileName);
+        XLSX.writeFile(workbook, `SSO_Updated_Stations_${dateStr}.xlsx`);
 
         document.getElementById('exportExcelModal').classList.add('hidden');
         customAlert('ดาวน์โหลดสำเร็จ', `ส่งออกข้อมูลจำนวน ${excelData.length} รายการ เรียบร้อยแล้ว`, 'success');
@@ -583,7 +581,7 @@ async function executeExcelExport() {
 }
 
 // ==========================================
-// 11. ประวัติ และ Export Script (SQL)
+// อัปเดตฟังก์ชัน History ให้แสดงข้อมูลที่อยู่และตำบลด้วย
 // ==========================================
 async function openHistoryModal() {
     document.getElementById('historyModal').classList.remove('hidden');
@@ -596,12 +594,32 @@ async function openHistoryModal() {
     tb.innerHTML = '';
     data.forEach(log => {
         const dStr = new Date(log.updated_at).toLocaleString('th-TH');
+        
+        // จัดการรูปแบบที่อยู่เดิม
+        let oldAddressFull = `${log.old_address || '-'} ต.${log.old_tambol_name || '-'} ${log.old_postal_code || '-'}`;
+        if(oldAddressFull === '- ต.- -') oldAddressFull = '-';
+        
+        // จัดการรูปแบบที่อยู่ใหม่
+        let newAddressFull = `${log.new_address || '-'} ต.${log.new_tambol_name || '-'} ${log.new_postal_code || '-'}`;
+        if(newAddressFull === '- ต.- -') newAddressFull = '-';
+
         tb.innerHTML += `
             <tr class="hover:bg-slate-50">
-                <td class="p-3 border-b text-xs text-slate-500">${dStr}<br><span class="font-semibold text-slate-700"><i class="fa-solid fa-user-pen mr-1"></i>${log.updated_by || 'Unknown'}</span></td>
-                <td class="p-3 border-b font-semibold text-[#1e3a8a]">${log.polling_station_code}</td>
-                <td class="p-3 border-b text-xs text-slate-500">ชื่อ: ${log.old_station_name || '-'}<br>สถานที่: ${log.old_location_name || '-'}</td>
-                <td class="p-3 border-b text-xs text-blue-700 bg-blue-50/30">ชื่อ: ${log.new_station_name || '-'}<br>สถานที่: ${log.new_location_name || '-'}</td>
+                <td class="p-3 border-b text-xs text-slate-500 min-w-[120px]">
+                    ${dStr}<br>
+                    <span class="font-semibold text-slate-700 mt-1 inline-block"><i class="fa-solid fa-user-pen mr-1"></i>${log.updated_by || 'Unknown'}</span>
+                </td>
+                <td class="p-3 border-b font-semibold text-[#1e3a8a] text-center">${log.polling_station_code}</td>
+                <td class="p-3 border-b text-xs text-slate-500">
+                    <div class="mb-1"><span class="font-semibold">ชื่อ:</span> ${log.old_station_name || '-'}</div>
+                    <div class="mb-1"><span class="font-semibold">สถานที่:</span> ${log.old_location_name || '-'}</div>
+                    <div><span class="font-semibold">ที่อยู่:</span> ${oldAddressFull}</div>
+                </td>
+                <td class="p-3 border-b text-xs text-blue-700 bg-blue-50/30">
+                    <div class="mb-1"><span class="font-semibold">ชื่อ:</span> ${log.new_station_name || '-'}</div>
+                    <div class="mb-1"><span class="font-semibold">สถานที่:</span> ${log.new_location_name || '-'}</div>
+                    <div><span class="font-semibold">ที่อยู่:</span> ${newAddressFull}</div>
+                </td>
             </tr>
         `;
     });
@@ -662,7 +680,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const btnHistory = document.getElementById('btnHistory'); if(btnHistory) btnHistory.addEventListener('click', openHistoryModal);
     const btnExport = document.getElementById('btnExport'); if(btnExport) btnExport.addEventListener('click', openExportModalFlow);
 
-    // ปุ่มสำหรับ Export Excel (ใหม่)
+    // ปุ่ม Export Excel
     const btnOpenExportExcel = document.getElementById('btnOpenExportExcel'); if(btnOpenExportExcel) btnOpenExportExcel.addEventListener('click', openExcelModalFlow);
     const btnExecuteExcel = document.getElementById('btnExecuteExcel'); if(btnExecuteExcel) btnExecuteExcel.addEventListener('click', executeExcelExport);
 
