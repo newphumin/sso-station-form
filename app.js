@@ -9,7 +9,7 @@ const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 let isSystemOpen = false;
 let stationsData = []; 
 let filterMapping = []; 
-let tambolMapping = new Map(); // เก็บความสัมพันธ์ อำเภอ -> ตำบล -> รหัสไปรษณีย์
+let tambolMapping = new Map(); // เก็บความสัมพันธ์ อำเภอ -> ตำบล -> รหัสไปรษณีย์ (จาก Master Table)
 
 let currentUserProfile = { name: '', sso: '' };
 let pendingSaveData = null; 
@@ -124,7 +124,7 @@ document.getElementById('btnSaveProfile').addEventListener('click', () => {
 });
 
 // ==========================================
-// 5. โหลดข้อมูลตัวกรอง และ Mapping
+// 5. โหลด Master Data และ Filter
 // ==========================================
 async function checkSystemStatus() {
     try {
@@ -156,6 +156,41 @@ async function toggleSystemStatus() {
     }
 }
 
+// โหลดตำบลจากตาราง Master Data ใหม่!
+async function loadTambolMaster() {
+    let allTambols = []; let from = 0; const step = 1000; let hasMore = true;
+    try {
+        while (hasMore) {
+            // *** หากตารางของคุณชื่ออื่น ให้แก้ตรง 'ms_tambol' ครับ ***
+            const { data, error } = await supabaseClient.from('ms_tambol')
+                .select('amphur_code, tambol_code, tambol_name, post_code')
+                .range(from, from + step - 1);
+            
+            if (error) throw error;
+            if (data && data.length > 0) { allTambols = allTambols.concat(data); from += step; if (data.length < step) hasMore = false; } else hasMore = false;
+        }
+
+        tambolMapping.clear();
+        allTambols.forEach(i => {
+            if (i.amphur_code && i.tambol_code) {
+                const aCodeStr = String(i.amphur_code);
+                const tCodeStr = String(i.tambol_code);
+                if (!tambolMapping.has(aCodeStr)) tambolMapping.set(aCodeStr, new Map());
+                
+                // ใช้ post_code ตามโครงสร้างตารางใหม่
+                tambolMapping.get(aCodeStr).set(tCodeStr, { 
+                    name: i.tambol_name, 
+                    zip: i.post_code ? String(i.post_code) : '' 
+                });
+            }
+        });
+        console.log("Loaded Tambol Master Data successfully.");
+    } catch (err) {
+        console.error("Error loading Tambol:", err);
+        customAlert('การเชื่อมต่อขัดข้อง', 'ไม่สามารถดึงข้อมูล Master Data ตำบลได้ โปรดตรวจสอบการตั้งค่า RLS ของตาราง ms_tambol', 'warning');
+    }
+}
+
 async function loadFilterOptions() {
     const provSelect = document.getElementById('filterProvince');
     provSelect.innerHTML = '<option value="">-- กำลังดึงข้อมูล... --</option>';
@@ -165,7 +200,7 @@ async function loadFilterOptions() {
     try {
         while (hasMore) {
             const { data, error } = await supabaseClient.from('ms_station_1')
-                .select('province_code, province_name, sso_branch_code, sso_name, amphur_code, amphur_name, tambol_code, tambol_name, postal_code')
+                .select('province_code, province_name, sso_branch_code, sso_name, amphur_code, amphur_name')
                 .order('province_code').order('sso_branch_code').order('amphur_code').range(from, from + step - 1);
             if (error) throw error;
             if (data && data.length > 0) { allData = allData.concat(data); from += step; if (data.length < step) hasMore = false; } else hasMore = false;
@@ -184,18 +219,7 @@ async function loadFilterOptions() {
             Array.from(ssoGlobalMap).forEach(([v, t]) => profileSSOs.push({value: t, text: t}));
             populateDropdown('profSSOInput', profileSSOs, '-- เลือกหน่วยงานต้นสังกัด --');
             if(currentUserProfile.sso) document.getElementById('profSSOInput').value = currentUserProfile.sso;
-
-            // บังคับแปลงรหัสทั้งหมดให้เป็น String ป้องกัน Type Mismatch
-            tambolMapping.clear();
-            filterMapping.forEach(i => {
-                if (i.amphur_code && i.tambol_code) {
-                    const aCodeStr = String(i.amphur_code);
-                    const tCodeStr = String(i.tambol_code);
-                    if (!tambolMapping.has(aCodeStr)) tambolMapping.set(aCodeStr, new Map());
-                    const amphurTambols = tambolMapping.get(aCodeStr);
-                    if (!amphurTambols.has(tCodeStr)) amphurTambols.set(tCodeStr, { name: i.tambol_name, zip: i.postal_code || '' });
-                }
-            });
+            
         } else {
             provSelect.innerHTML = '<option value="">-- ไม่พบข้อมูลในระบบ --</option>';
         }
@@ -276,15 +300,19 @@ function renderTable(data) {
         const tr = document.createElement('tr');
         tr.className = 'hover:bg-slate-50 transition border-b border-slate-100 relative';
         
-        // สร้าง Dropdown ตำบล โดยใช้ String บังคับ Type
+        // สร้าง Dropdown ตำบลจาก Master Table
         const aCodeStr = String(row.amphur_code);
         let tambolOptionsHTML = `<option value="">-- เลือกตำบล --</option>`;
         if (tambolMapping.has(aCodeStr)) {
             const tMap = tambolMapping.get(aCodeStr);
-            Array.from(tMap.entries()).forEach(([tCode, tData]) => {
+            // Sort ตำบลตามรหัสให้สวยงาม
+            const sortedTambols = Array.from(tMap.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+            sortedTambols.forEach(([tCode, tData]) => {
                 const selected = (String(row.tambol_code) === tCode) ? 'selected' : '';
                 tambolOptionsHTML += `<option value="${tCode}" ${selected}>${tCode} - ${tData.name}</option>`;
             });
+        } else {
+            tambolOptionsHTML = `<option value="">-- ไม่มีข้อมูลตำบล --</option>`;
         }
 
         tr.innerHTML = `
@@ -298,7 +326,6 @@ function renderTable(data) {
             <td class="px-2 py-2"><input type="text" id="addr_${row.polling_station_code}" class="w-full p-2 rounded editable-input text-slate-800" value="${row.address || ''}" disabled></td>
             
             <td class="px-2 py-2">
-                <!-- สังเกตส่งพารามิเตอร์เป็น String เสมอ -->
                 <select id="tam_${row.polling_station_code}" class="w-full p-2 rounded editable-input text-slate-800 appearance-none" disabled onchange="updateZipCode('${row.polling_station_code}', '${row.amphur_code}')">
                     ${tambolOptionsHTML}
                 </select>
@@ -325,9 +352,9 @@ function renderTable(data) {
 }
 
 function updateZipCode(code, amphurCode) {
-    const selectedTamCode = document.getElementById(`tam_${code}`).value; // อันนี้คือ String
+    const selectedTamCode = document.getElementById(`tam_${code}`).value; 
     const zipInput = document.getElementById(`zip_${code}`);
-    const aCodeStr = String(amphurCode); // ป้องกันบั๊ก
+    const aCodeStr = String(amphurCode); 
 
     if (selectedTamCode && tambolMapping.has(aCodeStr)) {
         const tMap = tambolMapping.get(aCodeStr);
@@ -402,7 +429,7 @@ function prepareSaveData(code, index) {
     }
 
     if (oldData.polling_station_name === newName && oldData.location_name === newLoc && oldData.location_url === newUrl && 
-        oldData.address === newAddr && String(oldData.tambol_code) === newTamCode && oldData.postal_code === newZip) {
+        oldData.address === newAddr && String(oldData.tambol_code || '') === newTamCode && oldData.postal_code === newZip) {
         customAlert('ข้อมูลไม่เปลี่ยนแปลง', 'คุณยังไม่ได้แก้ไขข้อมูลใดๆ ในแถวนี้', 'info');
         return;
     }
@@ -549,6 +576,7 @@ window.addEventListener('DOMContentLoaded', () => {
     loadUserProfile();
     checkSystemStatus();
     loadFilterOptions();
+    loadTambolMaster(); // โหลดตำบลรอไว้เลยตั้งแต่แรก
     setupDropdownEvents();
 
     document.getElementById('btnSearch').addEventListener('click', searchData);
