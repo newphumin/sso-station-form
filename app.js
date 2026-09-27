@@ -7,10 +7,9 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ==========================================
-// 2. ตัวแปรสถานะ
+// 2. ตัวแปรสถานะ & Pagination
 // ==========================================
 let isSystemOpen = false;
-let stationsData = []; 
 let filterMapping = []; 
 let tambolMapping = new Map(); 
 
@@ -18,6 +17,11 @@ let currentUserProfile = { name: '', sso: '' };
 let pendingSaveData = null; 
 let currentlyEditingCode = null; 
 let pendingAdminAction = null; 
+
+// ตัวแปรสำหรับแบ่งหน้า (Pagination)
+let currentSearchData = []; 
+let currentPage = 1;
+const itemsPerPage = 100;
 
 // ==========================================
 // 3. ฟังก์ชัน Custom Alerts & Confirm
@@ -159,7 +163,7 @@ async function toggleSystemStatus() {
             customAlert('สำเร็จ', `เปลี่ยนสถานะเป็น ${newStatus ? 'เปิด' : 'ปิด'}ระบบ เรียบร้อยแล้ว`, 'success'); 
             checkSystemStatus(); 
             if (!newStatus && currentlyEditingCode !== null) {
-                const idx = stationsData.findIndex(row => row.polling_station_code == currentlyEditingCode);
+                const idx = currentSearchData.findIndex(row => row.polling_station_code == currentlyEditingCode);
                 if (idx !== -1) cancelEdit(currentlyEditingCode, idx);
             }
         }
@@ -193,7 +197,6 @@ async function loadFilterOptions() {
     let allData = []; let from = 0; const step = 1000; let hasMore = true;
     try {
         while (hasMore) {
-            // [จุดอัปเดต] ดึง polling_station_code เข้ามาใน memory ด้วยเพื่อใช้ตอนกดดูประวัติ
             const { data, error } = await supabaseClient.from('ms_station_1')
                 .select('polling_station_code, province_code, province_name, sso_branch_code, sso_name, amphur_code, amphur_name')
                 .order('province_code').order('sso_branch_code').order('amphur_code').range(from, from + step - 1);
@@ -258,13 +261,14 @@ function setupDropdownEvents() {
 }
 
 // ==========================================
-// 7. ฟังก์ชันค้นหา / ตารางข้อมูล
+// 7. ฟังก์ชันค้นหา, แบ่งหน้า (Pagination) และตาราง
 // ==========================================
 async function searchData() {
     currentlyEditingCode = null; 
     const tb = document.getElementById('dataTableBody');
     if(!tb) return;
     tb.innerHTML = `<tr><td colspan="9" class="text-center py-10"><i class="fa-solid fa-spinner fa-spin text-2xl text-blue-500 mb-2"></i><br>กำลังค้นหาข้อมูล...</td></tr>`;
+    document.getElementById('paginationContainer').classList.add('hidden');
     
     const p = document.getElementById('filterProvince').value; const s = document.getElementById('filterSSO').value;
     const a = document.getElementById('filterAmphur').value; const txt = document.getElementById('searchInput').value.trim();
@@ -278,20 +282,100 @@ async function searchData() {
         else query = query.ilike('polling_station_name', `%${txt}%`);
     }
 
-    const { data, error } = await query.order('polling_station_code', { ascending: true }).limit(300);
+    // ดึงข้อมูลทั้งหมดที่ตรงกับตัวกรอง (ขยายขีดจำกัดเพื่อให้คลุมทั้งหมด)
+    const { data, error } = await query.order('polling_station_code', { ascending: true }).limit(5000);
+    
     if (error) { tb.innerHTML = `<tr><td colspan="9" class="text-center py-10 text-red-500">Error: ${error.message}</td></tr>`; return; }
 
-    stationsData = data;
+    currentSearchData = data;
+    currentPage = 1;
     document.getElementById('recordCount').innerText = `พบข้อมูล ${data.length} รายการ`;
-    renderTable(data);
+    
+    renderCurrentPage();
 }
 
-function renderTable(data) {
+function renderCurrentPage() {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+    const pageData = currentSearchData.slice(startIndex, endIndex);
+    
+    renderTable(pageData, startIndex);
+    renderPagination();
+}
+
+// ผูกฟังก์ชัน goToPage ให้ใช้งานได้ที่ระดับ Window
+window.goToPage = function(page) {
+    const totalPages = Math.ceil(currentSearchData.length / itemsPerPage);
+    if (page < 1 || page > totalPages) return;
+    
+    if (currentlyEditingCode !== null) {
+        customAlert('แจ้งเตือน', `กรุณาบันทึกหรือยกเลิกการแก้ไขให้เสร็จสิ้นก่อนเปลี่ยนหน้า`, 'warning');
+        return;
+    }
+    
+    currentPage = page;
+    renderCurrentPage();
+};
+
+function renderPagination() {
+    const container = document.getElementById('paginationContainer');
+    if (!container) return;
+    
+    const totalPages = Math.ceil(currentSearchData.length / itemsPerPage);
+    
+    if (currentSearchData.length === 0) {
+        container.classList.add('hidden');
+        return;
+    }
+
+    container.classList.remove('hidden');
+
+    const startItem = ((currentPage - 1) * itemsPerPage) + 1;
+    const endItem = Math.min(currentPage * itemsPerPage, currentSearchData.length);
+    
+    let html = `<div class="text-sm text-slate-500 mb-3 md:mb-0">แสดงผล <span class="font-bold">${startItem} - ${endItem}</span> จาก <span class="font-bold">${currentSearchData.length}</span> รายการ</div>`;
+    
+    html += `<div class="flex items-center gap-1">`;
+    
+    // ปุ่มก่อนหน้า
+    html += `<button onclick="goToPage(${currentPage - 1})" class="px-3 py-1.5 border border-slate-300 rounded text-sm hover:bg-slate-100 text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed transition" ${currentPage === 1 ? 'disabled' : ''}><i class="fa-solid fa-chevron-left mr-1"></i> ก่อนหน้า</button>`;
+    
+    // คำนวณตัวเลขหน้าที่จะแสดง (โชว์รอบๆ หน้าปัจจุบัน)
+    let startPage = Math.max(1, currentPage - 2);
+    let endPage = Math.min(totalPages, currentPage + 2);
+    
+    if (startPage > 1) {
+        html += `<button onclick="goToPage(1)" class="px-3 py-1.5 border border-slate-300 rounded text-sm hover:bg-slate-100 text-slate-600 transition">1</button>`;
+        if (startPage > 2) html += `<span class="px-2 text-slate-400">...</span>`;
+    }
+
+    for (let i = startPage; i <= endPage; i++) {
+        const activeClass = i === currentPage 
+            ? 'bg-[#1e3a8a] text-white border-[#1e3a8a] font-bold shadow-sm' 
+            : 'border-slate-300 hover:bg-slate-100 text-slate-600';
+        html += `<button onclick="goToPage(${i})" class="px-3 py-1.5 border rounded text-sm transition ${activeClass}">${i}</button>`;
+    }
+
+    if (endPage < totalPages) {
+        if (endPage < totalPages - 1) html += `<span class="px-2 text-slate-400">...</span>`;
+        html += `<button onclick="goToPage(${totalPages})" class="px-3 py-1.5 border border-slate-300 rounded text-sm hover:bg-slate-100 text-slate-600 transition">${totalPages}</button>`;
+    }
+
+    // ปุ่มถัดไป
+    html += `<button onclick="goToPage(${currentPage + 1})" class="px-3 py-1.5 border border-slate-300 rounded text-sm hover:bg-slate-100 text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed transition" ${currentPage === totalPages ? 'disabled' : ''}>ถัดไป <i class="fa-solid fa-chevron-right ml-1"></i></button>`;
+    
+    html += `</div>`;
+    container.innerHTML = html;
+}
+
+function renderTable(data, startIndex) {
     const tb = document.getElementById('dataTableBody');
     tb.innerHTML = '';
     if (data.length === 0) { tb.innerHTML = `<tr><td colspan="9" class="text-center py-16 text-slate-400">ไม่พบข้อมูลที่ตรงกับเงื่อนไข</td></tr>`; return; }
 
     data.forEach((row, idx) => {
+        // ใช้ absoluteIndex เพื่อให้ปุ่มอ้างอิงไปที่ข้อมูลก้อนหลักได้ถูกต้อง
+        const absoluteIndex = startIndex + idx;
         const tr = document.createElement('tr');
         tr.className = 'hover:bg-slate-50 transition border-b border-slate-100 relative';
         
@@ -306,20 +390,21 @@ function renderTable(data) {
             });
         } else tambolOptionsHTML = `<option value="">-- ไม่มีข้อมูลตำบล --</option>`;
 
+        // เพิ่ม min-w-0 และ w-full ให้ input เพื่อไม่ให้ดันตารางกว้างเกินไป
         tr.innerHTML = `
-            <td class="px-4 py-3 text-slate-600 text-xs whitespace-normal min-w-[200px]">${row.province_code || ''} - ${row.province_name || '-'} > ${row.amphur_name || '-'}<br><span class="font-semibold text-slate-800">${row.sso_branch_code || ''} - ${row.sso_name || '-'}</span></td>
-            <td class="px-4 py-3 font-semibold text-[#1e3a8a]">${row.polling_station_code}</td>
-            <td class="px-2 py-2"><input type="text" id="name_${row.polling_station_code}" class="w-full p-2 rounded editable-input text-slate-800 font-medium" value="${row.polling_station_name || ''}" disabled></td>
-            <td class="px-2 py-2"><input type="text" id="loc_${row.polling_station_code}" class="w-full p-2 rounded editable-input text-slate-800" value="${row.location_name || ''}" disabled></td>
-            <td class="px-2 py-2"><input type="text" id="addr_${row.polling_station_code}" class="w-full p-2 rounded editable-input text-slate-800" value="${row.address || ''}" disabled></td>
-            <td class="px-2 py-2"><select id="tam_${row.polling_station_code}" class="w-full p-2 rounded editable-input text-slate-800 appearance-none" disabled onchange="updateZipCode('${row.polling_station_code}', '${row.amphur_code}')">${tambolOptionsHTML}</select></td>
-            <td class="px-2 py-2"><input type="text" id="zip_${row.polling_station_code}" class="w-full p-2 rounded editable-input text-slate-500 bg-slate-100/50 text-center" value="${row.postal_code || ''}" readonly disabled></td>
-            <td class="px-2 py-2"><input type="text" id="url_${row.polling_station_code}" class="w-full p-2 rounded editable-input text-blue-600" value="${row.location_url || ''}" disabled></td>
-            <td class="px-3 py-3 text-center min-w-[120px] border-l align-middle bg-white">
-                <button id="btn_edit_${row.polling_station_code}" onclick="enableEdit('${row.polling_station_code}')" class="btn-edit bg-orange-500 hover:bg-orange-600 text-white px-3 py-1.5 rounded shadow-sm text-xs font-bold w-full transition" ${!isSystemOpen ? 'disabled' : ''}><i class="fa-solid fa-pen mr-1"></i> แก้ไข</button>
-                <div id="action_group_${row.polling_station_code}" class="hidden gap-1 justify-between">
-                    <button id="btn_save_${row.polling_station_code}" onclick="prepareSaveData('${row.polling_station_code}', ${idx})" class="btn-save bg-green-600 hover:bg-green-700 text-white px-2 py-1.5 rounded shadow-sm text-xs font-bold flex-1 transition" title="บันทึก"><i class="fa-solid fa-save"></i></button>
-                    <button id="btn_cancel_${row.polling_station_code}" onclick="cancelEdit('${row.polling_station_code}', ${idx})" class="btn-cancel bg-slate-500 hover:bg-slate-600 text-white px-2 py-1.5 rounded shadow-sm text-xs font-bold flex-1 transition" title="ยกเลิกการแก้ไข"><i class="fa-solid fa-xmark"></i></button>
+            <td class="px-3 py-3 text-slate-600 text-xs whitespace-normal break-words">${row.province_code || ''} - ${row.province_name || '-'} > ${row.amphur_name || '-'}<br><span class="font-semibold text-slate-800">${row.sso_branch_code || ''} - ${row.sso_name || '-'}</span></td>
+            <td class="px-2 py-3 font-semibold text-[#1e3a8a] whitespace-nowrap">${row.polling_station_code}</td>
+            <td class="px-2 py-2"><input type="text" id="name_${row.polling_station_code}" class="w-full min-w-0 p-2 rounded editable-input text-slate-800 font-medium" value="${row.polling_station_name || ''}" disabled></td>
+            <td class="px-2 py-2"><input type="text" id="loc_${row.polling_station_code}" class="w-full min-w-0 p-2 rounded editable-input text-slate-800" value="${row.location_name || ''}" disabled></td>
+            <td class="px-2 py-2"><input type="text" id="addr_${row.polling_station_code}" class="w-full min-w-0 p-2 rounded editable-input text-slate-800" value="${row.address || ''}" disabled></td>
+            <td class="px-2 py-2"><select id="tam_${row.polling_station_code}" class="w-full min-w-0 p-2 rounded editable-input text-slate-800 appearance-none" disabled onchange="updateZipCode('${row.polling_station_code}', '${row.amphur_code}')">${tambolOptionsHTML}</select></td>
+            <td class="px-2 py-2"><input type="text" id="zip_${row.polling_station_code}" class="w-full min-w-0 p-2 rounded editable-input text-slate-500 bg-slate-100/50 text-center" value="${row.postal_code || ''}" readonly disabled></td>
+            <td class="px-2 py-2"><input type="text" id="url_${row.polling_station_code}" class="w-full min-w-0 p-2 rounded editable-input text-blue-600 text-ellipsis" value="${row.location_url || ''}" disabled title="${row.location_url || ''}"></td>
+            <td class="px-2 py-3 text-center align-middle bg-white">
+                <button id="btn_edit_${row.polling_station_code}" onclick="enableEdit('${row.polling_station_code}')" class="btn-edit bg-orange-500 hover:bg-orange-600 text-white px-2 py-1.5 rounded shadow-sm text-xs font-bold w-full transition" ${!isSystemOpen ? 'disabled' : ''}><i class="fa-solid fa-pen"></i> แก้ไข</button>
+                <div id="action_group_${row.polling_station_code}" class="hidden gap-1 justify-center">
+                    <button id="btn_save_${row.polling_station_code}" onclick="prepareSaveData('${row.polling_station_code}', ${absoluteIndex})" class="btn-save bg-green-600 hover:bg-green-700 text-white px-2 py-1.5 rounded shadow-sm text-xs font-bold flex-1 transition" title="บันทึก"><i class="fa-solid fa-save"></i></button>
+                    <button id="btn_cancel_${row.polling_station_code}" onclick="cancelEdit('${row.polling_station_code}', ${absoluteIndex})" class="btn-cancel bg-slate-500 hover:bg-slate-600 text-white px-2 py-1.5 rounded shadow-sm text-xs font-bold flex-1 transition" title="ยกเลิกการแก้ไข"><i class="fa-solid fa-xmark"></i></button>
                 </div>
             </td>
         `;
@@ -355,8 +440,8 @@ function enableEdit(code) {
     document.getElementById(ids[0]).focus();
 }
 
-function cancelEdit(code, index) {
-    const oldData = stationsData[index];
+function cancelEdit(code, absoluteIndex) {
+    const oldData = currentSearchData[absoluteIndex];
     document.getElementById(`name_${code}`).value = oldData.polling_station_name || '';
     document.getElementById(`loc_${code}`).value = oldData.location_name || '';
     document.getElementById(`addr_${code}`).value = oldData.address || '';
@@ -375,9 +460,9 @@ function cancelEdit(code, index) {
 // ==========================================
 // 9. ระบบตรวจสอบ และ บันทึกข้อมูล
 // ==========================================
-function prepareSaveData(code, index) {
+function prepareSaveData(code, absoluteIndex) {
     if (!isSystemOpen) return;
-    const oldData = stationsData[index];
+    const oldData = currentSearchData[absoluteIndex];
     const newName = document.getElementById(`name_${code}`).value.trim(); const newLoc = document.getElementById(`loc_${code}`).value.trim();
     const newAddr = document.getElementById(`addr_${code}`).value.trim(); const newTamCode = document.getElementById(`tam_${code}`).value;
     const newZip = document.getElementById(`zip_${code}`).value.trim(); const newUrl = document.getElementById(`url_${code}`).value.trim();
@@ -393,7 +478,7 @@ function prepareSaveData(code, index) {
         customAlert('ข้อมูลไม่เปลี่ยนแปลง', 'คุณยังไม่ได้แก้ไขข้อมูลใดๆ ในแถวนี้', 'info'); return;
     }
 
-    pendingSaveData = { code, index, oldData, newName, newLoc, newAddr, newTamCode, newTamName, newZip, newUrl };
+    pendingSaveData = { code, index: absoluteIndex, oldData, newName, newLoc, newAddr, newTamCode, newTamName, newZip, newUrl };
 
     document.getElementById('confirmCodeBadge').innerText = `รหัส: ${code}`;
     setConfirmRow('Name', oldData.polling_station_name, newName); setConfirmRow('Loc', oldData.location_name, newLoc); setConfirmRow('Addr', oldData.address, newAddr);
@@ -447,9 +532,10 @@ async function executeSaveData() {
         sql_script: sqlScript, updated_by: signature 
     }]);
 
-    stationsData[index].polling_station_name = newName; stationsData[index].location_name = newLoc;
-    stationsData[index].address = newAddr; stationsData[index].tambol_code = newTamCode;
-    stationsData[index].tambol_name = newTamName; stationsData[index].postal_code = newZip; stationsData[index].location_url = newUrl;
+    // อัปเดตข้อมูลใน currentSearchData ให้ตรงกับที่เพิ่งบันทึก
+    currentSearchData[index].polling_station_name = newName; currentSearchData[index].location_name = newLoc;
+    currentSearchData[index].address = newAddr; currentSearchData[index].tambol_code = newTamCode;
+    currentSearchData[index].tambol_name = newTamName; currentSearchData[index].postal_code = newZip; currentSearchData[index].location_url = newUrl;
     
     const ids = [`name_${code}`, `loc_${code}`, `addr_${code}`, `tam_${code}`, `zip_${code}`, `url_${code}`];
     ids.forEach(id => { const el = document.getElementById(id); el.disabled = true; el.classList.remove('bg-yellow-50', 'border-yellow-300', 'bg-slate-100', 'text-slate-800'); });
@@ -509,7 +595,6 @@ async function executeExcelExport() {
         const s = document.getElementById('excelFilterSSO').value;
         const a = document.getElementById('excelFilterAmphur').value;
 
-        // 1. ดึงประวัติ Logs แบบ Loop (ปลอดภัยจากข้อจำกัด 1000 แถว)
         let allLogs = [];
         let logFrom = 0; const logStep = 1000; let logHasMore = true;
         while(logHasMore) {
@@ -519,7 +604,6 @@ async function executeExcelExport() {
             if (logs && logs.length > 0) { allLogs = allLogs.concat(logs); logFrom += logStep; if (logs.length < logStep) logHasMore = false; } else logHasMore = false;
         }
 
-        // เก็บประวัติล่าสุด (Deduplication)
         const latestLogs = new Map();
         allLogs.forEach(log => { latestLogs.set(String(log.polling_station_code), log); });
 
@@ -529,7 +613,6 @@ async function executeExcelExport() {
             return;
         }
 
-        // 2. ดึงข้อมูลตารางหลักแบบ Loop
         let allStations = [];
         let stFrom = 0; const stStep = 1000; let stHasMore = true;
         while (stHasMore) {
@@ -543,29 +626,23 @@ async function executeExcelExport() {
             if (stations && stations.length > 0) { allStations = allStations.concat(stations); stFrom += stStep; if (stations.length < stStep) stHasMore = false; } else stHasMore = false;
         }
 
-        // 3. จัดเรียงข้อมูล (Sorting) ตามลำดับ: สปส. -> จังหวัด -> อำเภอ -> รหัสหน่วย
         allStations.sort((a, b) => {
             const ssoA = String(a.sso_branch_code || ''); const ssoB = String(b.sso_branch_code || '');
             if (ssoA !== ssoB) return ssoA.localeCompare(ssoB);
-            
             const provA = String(a.province_code || ''); const provB = String(b.province_code || '');
             if (provA !== provB) return provA.localeCompare(provB);
-            
             const ampA = String(a.amphur_code || ''); const ampB = String(b.amphur_code || '');
             if (ampA !== ampB) return ampA.localeCompare(ampB);
-            
             const pollA = Number(a.polling_station_code) || 0; const pollB = Number(b.polling_station_code) || 0;
             return pollA - pollB; 
         });
 
-        // 4. ประกอบร่างข้อมูล
         const excelData = [];
         allStations.forEach(st => {
             const codeStr = String(st.polling_station_code);
             if (latestLogs.has(codeStr)) {
                 const log = latestLogs.get(codeStr);
                 const dStr = new Date(log.updated_at).toLocaleString('th-TH');
-                
                 excelData.push({
                     "จังหวัด": st.province_name || '',
                     "สำนักงาน สปส.": st.sso_name || '',
@@ -595,7 +672,6 @@ async function executeExcelExport() {
             return;
         }
 
-        // 5. สร้างไฟล์ Excel
         const worksheet = XLSX.utils.json_to_sheet(excelData);
         const wscols = [
             {wch: 15}, {wch: 25}, {wch: 15}, {wch: 12}, 
@@ -624,31 +700,26 @@ async function executeExcelExport() {
 }
 
 // ==========================================
-// 11. ประวัติ (หน้าต่าง Modal Filter ระดับจังหวัด)
+// 11. ประวัติ และ Export Script (SQL)
 // ==========================================
 async function openHistoryModal() {
     document.getElementById('historyModal').classList.remove('hidden');
     const tb = document.getElementById('historyTableBody');
     tb.innerHTML = `<tr><td colspan="4" class="text-center py-4">กำลังโหลด...</td></tr>`;
 
-    // เช็คค่าจังหวัดที่ถูกเลือกอยู่ในขณะนั้น
     const p = document.getElementById('filterProvince').value;
     let provNameText = p ? `เฉพาะจังหวัดที่เลือก` : `ทั่วประเทศ`;
 
-    // โหลดประวัติมาเผื่อไว้กรองใน Memory (2000 แถว) ป้องกันการพลาดข้อมูล
     const { data, error } = await supabaseClient.from('station_update_logs').select('*').order('updated_at', { ascending: false }).limit(2000);
     if (error || !data) { tb.innerHTML = `<tr><td colspan="4" class="text-center py-4 text-red-500">โหลดประวัติล้มเหลว</td></tr>`; return; }
 
     let filteredLogs = data;
-
-    // ถ้ามีการเลือกจังหวัด ให้กรองประวัติเอาเฉพาะรหัสหน่วยที่อยู่ในจังหวัดนั้น
     if (p) {
         const codeToProv = new Map();
         filterMapping.forEach(item => codeToProv.set(String(item.polling_station_code), String(item.province_code)));
         filteredLogs = data.filter(log => codeToProv.get(String(log.polling_station_code)) === p);
     }
 
-    // ตัดเอาเฉพาะ 50 รายการล่าสุดของจังหวัดนั้น
     filteredLogs = filteredLogs.slice(0, 50);
     tb.innerHTML = '';
 
@@ -730,6 +801,8 @@ window.addEventListener('DOMContentLoaded', () => {
             document.getElementById('searchInput').value = '';
             document.getElementById('dataTableBody').innerHTML = `<tr><td colspan="9" class="text-center py-20 text-slate-400">กรุณาเลือกเงื่อนไขและกดค้นหา</td></tr>`;
             document.getElementById('recordCount').innerText = 'พบข้อมูล 0 รายการ';
+            document.getElementById('paginationContainer').classList.add('hidden');
+            currentSearchData = [];
             currentlyEditingCode = null; 
         });
     }
