@@ -291,7 +291,7 @@ function renderTable(data) {
             
             <td class="px-2 py-2"><input type="text" id="url_${row.polling_station_code}" class="w-full p-2 rounded editable-input text-blue-600" value="${row.location_url || ''}" disabled></td>
             
-            <td class="px-3 py-3 text-center min-w-[130px] sticky right-0 bg-white border-l z-10 shadow-[-4px_0_10px_rgba(0,0,0,0.05)]">
+            <td class="px-3 py-3 text-center min-w-[120px] border-l align-middle bg-white">
                 <button id="btn_edit_${row.polling_station_code}" onclick="enableEdit('${row.polling_station_code}')" class="btn-edit bg-orange-500 hover:bg-orange-600 text-white px-3 py-1.5 rounded shadow-sm text-xs font-bold w-full transition" ${!isSystemOpen ? 'disabled' : ''}>
                     <i class="fa-solid fa-pen mr-1"></i> แก้ไข
                 </button>
