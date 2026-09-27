@@ -140,15 +140,19 @@
             </div>
         </div>
 
-        <!-- Data Table Card (ปรับเป็น table-fixed ป้องกันทะลุกรอบ) -->
+        <!-- Data Table Card -->
         <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col min-h-[500px]">
             <div class="p-4 border-b bg-slate-50 flex justify-between items-center">
                 <h3 class="font-bold text-slate-700"><i class="fa-solid fa-table-list mr-2 text-[#1e3a8a]"></i>รายการหน่วยเลือกตั้ง</h3>
                 <span id="recordCount" class="text-sm font-medium text-slate-500 bg-slate-200 px-3 py-1 rounded-full">พบข้อมูล 0 รายการ</span>
             </div>
             
+            <!-- เพิ่ม Pagination ด้านบน -->
+            <div id="paginationContainerTop" class="hidden flex flex-col md:flex-row items-center justify-between px-4 py-3 bg-white border-b border-slate-200">
+                <!-- สร้างผ่าน JavaScript -->
+            </div>
+            
             <div class="overflow-x-auto flex-grow relative">
-                <!-- เปลี่ยนเป็น table-fixed และจัดการสัดส่วนเปอร์เซ็นต์ -->
                 <table class="w-full text-sm text-left table-fixed">
                     <thead class="bg-[#1e3a8a] text-white sticky top-0 z-10 shadow-sm">
                         <tr>
@@ -178,8 +182,8 @@
                 </table>
             </div>
             
-            <!-- ส่วนแบ่งหน้า (Pagination Container) -->
-            <div id="paginationContainer" class="hidden flex flex-col md:flex-row items-center justify-between px-4 py-3 bg-slate-50 border-t border-slate-200">
+            <!-- Pagination ด้านล่าง (เปลี่ยน ID ให้ชัดเจน) -->
+            <div id="paginationContainerBottom" class="hidden flex flex-col md:flex-row items-center justify-between px-4 py-3 bg-slate-50 border-t border-slate-200">
                 <!-- สร้างผ่าน JavaScript -->
             </div>
             
