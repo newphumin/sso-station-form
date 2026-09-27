@@ -148,45 +148,73 @@ async function checkSystemStatus() {
     } catch (err) {}
 }
 
+// ==========================================
+// 5. โหลดข้อมูลตัวกรอง และ Mapping ตำบล
+// ==========================================
 async function loadFilterOptions() {
-    let allData = []; let from = 0; const step = 1000; let hasMore = true;
-    while (hasMore) {
-        // เพิ่มการดึง tambol, postal_code และ address มาด้วย
-        const { data, error } = await supabaseClient.from('ms_station_1')
-            .select('province_code, province_name, sso_branch_code, sso_name, amphur_code, amphur_name, tambol_code, tambol_name, postal_code')
-            .order('province_code').order('sso_branch_code').order('amphur_code').range(from, from + step - 1);
-        if (error) return;
-        if (data && data.length > 0) { allData = allData.concat(data); from += step; if (data.length < step) hasMore = false; } else hasMore = false;
-    }
+    const provSelect = document.getElementById('filterProvince');
+    provSelect.innerHTML = '<option value="">-- กำลังดึงข้อมูล... --</option>';
+    provSelect.disabled = true;
 
-    if (allData.length > 0) {
-        filterMapping = allData; 
-        
-        // กรองจังหวัด
-        const provMap = new Map();
-        filterMapping.forEach(i => { if (i.province_code && !provMap.has(i.province_code)) provMap.set(i.province_code, `${i.province_code} - ${i.province_name}`); });
-        populateDropdown('filterProvince', Array.from(provMap, ([value, text]) => ({value, text})), '-- แสดงทุกจังหวัด --');
-        document.getElementById('filterProvince').disabled = false;
+    let allData = []; 
+    let from = 0; 
+    const step = 1000; 
+    let hasMore = true;
 
-        // กรอง สปส.
-        const ssoGlobalMap = new Map();
-        filterMapping.forEach(i => { if (i.sso_branch_code && !ssoGlobalMap.has(i.sso_branch_code)) ssoGlobalMap.set(i.sso_branch_code, `${i.sso_branch_code} - ${i.sso_name}`); });
-        const profileSSOs = [{value: '1000 - ส่วนกลาง', text: '1000 - ส่วนกลาง'}];
-        Array.from(ssoGlobalMap).forEach(([v, t]) => profileSSOs.push({value: t, text: t}));
-        populateDropdown('profSSOInput', profileSSOs, '-- เลือกหน่วยงานต้นสังกัด --');
-        if(currentUserProfile.sso) document.getElementById('profSSOInput').value = currentUserProfile.sso;
-
-        // สร้าง Mapping โครงสร้าง ตำบลและรหัสไปรษณีย์ (จัดกลุ่มตามรหัสอำเภอ)
-        tambolMapping.clear();
-        filterMapping.forEach(i => {
-            if (i.amphur_code && i.tambol_code) {
-                if (!tambolMapping.has(i.amphur_code)) tambolMapping.set(i.amphur_code, new Map());
-                const amphurTambols = tambolMapping.get(i.amphur_code);
-                if (!amphurTambols.has(i.tambol_code)) {
-                    amphurTambols.set(i.tambol_code, { name: i.tambol_name, zip: i.postal_code || '' });
-                }
+    try {
+        while (hasMore) {
+            // เพิ่มการดึง tambol, postal_code และ address มาด้วย
+            const { data, error } = await supabaseClient.from('ms_station_1')
+                .select('province_code, province_name, sso_branch_code, sso_name, amphur_code, amphur_name, tambol_code, tambol_name, postal_code')
+                .order('province_code').order('sso_branch_code').order('amphur_code')
+                .range(from, from + step - 1);
+            
+            if (error) throw error; // โยน Error เข้า Catch ทันทีหากติด RLS
+            
+            if (data && data.length > 0) { 
+                allData = allData.concat(data); 
+                from += step; 
+                if (data.length < step) hasMore = false; 
+            } else {
+                hasMore = false;
             }
-        });
+        }
+
+        if (allData.length > 0) {
+            filterMapping = allData; 
+            
+            // กรองจังหวัด
+            const provMap = new Map();
+            filterMapping.forEach(i => { if (i.province_code && !provMap.has(i.province_code)) provMap.set(i.province_code, `${i.province_code} - ${i.province_name}`); });
+            populateDropdown('filterProvince', Array.from(provMap, ([value, text]) => ({value, text})), '-- แสดงทุกจังหวัด --');
+            document.getElementById('filterProvince').disabled = false;
+
+            // กรอง สปส.
+            const ssoGlobalMap = new Map();
+            filterMapping.forEach(i => { if (i.sso_branch_code && !ssoGlobalMap.has(i.sso_branch_code)) ssoGlobalMap.set(i.sso_branch_code, `${i.sso_branch_code} - ${i.sso_name}`); });
+            const profileSSOs = [{value: '1000 - ส่วนกลาง', text: '1000 - ส่วนกลาง'}];
+            Array.from(ssoGlobalMap).forEach(([v, t]) => profileSSOs.push({value: t, text: t}));
+            populateDropdown('profSSOInput', profileSSOs, '-- เลือกหน่วยงานต้นสังกัด --');
+            if(currentUserProfile.sso) document.getElementById('profSSOInput').value = currentUserProfile.sso;
+
+            // สร้าง Mapping โครงสร้าง ตำบลและรหัสไปรษณีย์ (จัดกลุ่มตามรหัสอำเภอ)
+            tambolMapping.clear();
+            filterMapping.forEach(i => {
+                if (i.amphur_code && i.tambol_code) {
+                    if (!tambolMapping.has(i.amphur_code)) tambolMapping.set(i.amphur_code, new Map());
+                    const amphurTambols = tambolMapping.get(i.amphur_code);
+                    if (!amphurTambols.has(i.tambol_code)) {
+                        amphurTambols.set(i.tambol_code, { name: i.tambol_name, zip: i.postal_code || '' });
+                    }
+                }
+            });
+        } else {
+            provSelect.innerHTML = '<option value="">-- ไม่พบข้อมูลในระบบ (ตารางว่าง) --</option>';
+        }
+    } catch (err) {
+        console.error('Error Loading Filters:', err);
+        provSelect.innerHTML = '<option value="">-- โหลดข้อมูลล้มเหลว --</option>';
+        customAlert('ดึงข้อมูลล้มเหลว', 'โปรดตรวจสอบว่าได้ทำการ Disable RLS ในตาราง ms_station_1 หรือยัง\nรายละเอียด: ' + err.message, 'error');
     }
 }
 
