@@ -76,24 +76,28 @@
                 <h2 class="font-bold text-lg">เงื่อนไขการค้นหาข้อมูล</h2>
             </div>
             <div class="grid grid-cols-1 md:grid-cols-4 gap-5 mb-5">
+                <!-- 1. จังหวัด -->
                 <div>
                     <label class="block text-sm font-semibold text-slate-700 mb-1">จังหวัด</label>
                     <select id="filterProvince" class="w-full border border-slate-300 p-2.5 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-slate-50 disabled:opacity-50">
                         <option value="">-- แสดงทุกจังหวัด --</option>
                     </select>
                 </div>
-                <div>
-                    <label class="block text-sm font-semibold text-slate-700 mb-1">อำเภอ</label>
-                    <select id="filterAmphur" class="w-full border border-slate-300 p-2.5 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-slate-50 disabled:opacity-50">
-                        <option value="">-- แสดงทุกอำเภอ --</option>
-                    </select>
-                </div>
+                <!-- 2. สปส. (ย้ายมาอยู่อันดับ 2) -->
                 <div>
                     <label class="block text-sm font-semibold text-slate-700 mb-1">สำนักงาน สปส. รับผิดชอบ</label>
                     <select id="filterSSO" class="w-full border border-slate-300 p-2.5 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-slate-50 disabled:opacity-50">
                         <option value="">-- แสดงทุกสำนักงาน --</option>
                     </select>
                 </div>
+                <!-- 3. อำเภอ (ย้ายมาอยู่อันดับ 3) -->
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-1">อำเภอ</label>
+                    <select id="filterAmphur" class="w-full border border-slate-300 p-2.5 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-slate-50 disabled:opacity-50">
+                        <option value="">-- แสดงทุกอำเภอ --</option>
+                    </select>
+                </div>
+                <!-- 4. ค้นหาอิสระ -->
                 <div>
                     <label class="block text-sm font-semibold text-slate-700 mb-1">ค้นหาอิสระ</label>
                     <div class="relative">
