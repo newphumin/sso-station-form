@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ระบบบริหารจัดการข้อมูลสถานที่เลือกตั้ง - สำนักงานประกันสังคม</title>
-    <!-- เพิ่ม Favicon โลโก้ สปส. จำลองบนแท็บเบราว์เซอร์ -->
+    <!-- เพิ่ม Favicon -->
     <link rel="icon" href="https://cdn-icons-png.flaticon.com/512/3135/3135715.png" type="image/png">
     
     <!-- Tailwind CSS -->
@@ -13,37 +13,38 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <!-- FontAwesome สำหรับ Icon -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Google Fonts: Sarabun (ฟอนต์มาตรฐานราชการไทย) -->
+    <!-- Google Fonts: Sarabun -->
     <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     
     <style>
-        /* บังคับใช้ฟอนต์ Sarabun ทั้งหน้าเว็บ */
         body { font-family: 'Sarabun', sans-serif; }
         .hidden { display: none !important; }
         
-        /* ตกแต่ง Scrollbar ให้ดูสะอาดตา */
         ::-webkit-scrollbar { width: 8px; height: 8px; }
         ::-webkit-scrollbar-track { background: #f1f5f9; }
         ::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 4px; }
         ::-webkit-scrollbar-thumb:hover { background: #64748b; }
 
-        /* ตกแต่ง Input ในตารางให้เด่นขึ้นเมื่อคลิก */
+        /* สไตล์ช่องกรอกข้อมูล */
         .editable-input {
             transition: all 0.2s;
             border: 1px solid transparent;
-            background-color: transparent;
         }
         .editable-input:focus {
-            background-color: #ffffff;
-            border-color: #eab308; /* สีเหลืองทอง สปส. */
-            box-shadow: 0 0 0 2px rgba(234, 179, 8, 0.2);
             outline: none;
+            border-color: #eab308;
+            box-shadow: 0 0 0 2px rgba(234, 179, 8, 0.2);
+        }
+        .editable-input:disabled {
+            background-color: transparent;
+            color: #334155;
+            cursor: not-allowed;
         }
     </style>
 </head>
 <body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col">
 
-    <!-- Header / Navbar (ธีมสีน้ำเงิน-เหลือง สปส.) -->
+    <!-- Header -->
     <header class="bg-[#1e3a8a] text-white shadow-md border-b-4 border-[#eab308] sticky top-0 z-40">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
             <div class="flex items-center gap-3">
@@ -69,35 +70,31 @@
     <!-- Main Content -->
     <main class="flex-grow max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
         
-        <!-- Section 1: กรองข้อมูล (Filter Card) -->
+        <!-- Filter Card -->
         <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 mb-6">
             <div class="flex items-center gap-2 mb-4 text-[#1e3a8a] border-b pb-2">
                 <i class="fa-solid fa-filter"></i>
                 <h2 class="font-bold text-lg">เงื่อนไขการค้นหาข้อมูล</h2>
             </div>
             <div class="grid grid-cols-1 md:grid-cols-4 gap-5 mb-5">
-                <!-- 1. จังหวัด -->
                 <div>
                     <label class="block text-sm font-semibold text-slate-700 mb-1">จังหวัด</label>
                     <select id="filterProvince" class="w-full border border-slate-300 p-2.5 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-slate-50 disabled:opacity-50">
                         <option value="">-- แสดงทุกจังหวัด --</option>
                     </select>
                 </div>
-                <!-- 2. สปส. (ย้ายมาอยู่อันดับ 2) -->
                 <div>
                     <label class="block text-sm font-semibold text-slate-700 mb-1">สำนักงาน สปส. รับผิดชอบ</label>
                     <select id="filterSSO" class="w-full border border-slate-300 p-2.5 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-slate-50 disabled:opacity-50">
                         <option value="">-- แสดงทุกสำนักงาน --</option>
                     </select>
                 </div>
-                <!-- 3. อำเภอ (ย้ายมาอยู่อันดับ 3) -->
                 <div>
                     <label class="block text-sm font-semibold text-slate-700 mb-1">อำเภอ</label>
                     <select id="filterAmphur" class="w-full border border-slate-300 p-2.5 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-slate-50 disabled:opacity-50">
                         <option value="">-- แสดงทุกอำเภอ --</option>
                     </select>
                 </div>
-                <!-- 4. ค้นหาอิสระ -->
                 <div>
                     <label class="block text-sm font-semibold text-slate-700 mb-1">ค้นหาอิสระ</label>
                     <div class="relative">
@@ -129,8 +126,8 @@
             </div>
         </div>
 
-        <!-- Section 2: ตารางแสดงผลข้อมูล (Data Table Card) -->
-        <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col h-[500px]">
+        <!-- Data Table Card -->
+        <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col h-[600px]">
             <div class="p-4 border-b bg-slate-50 flex justify-between items-center">
                 <h3 class="font-bold text-slate-700"><i class="fa-solid fa-table-list mr-2 text-[#1e3a8a]"></i>รายการหน่วยเลือกตั้ง</h3>
                 <span id="recordCount" class="text-sm font-medium text-slate-500 bg-slate-200 px-3 py-1 rounded-full">พบข้อมูล 0 รายการ</span>
@@ -142,15 +139,15 @@
                         <tr>
                             <th class="px-4 py-3.5 font-medium tracking-wide">พื้นที่ / สปส.</th>
                             <th class="px-4 py-3.5 font-medium tracking-wide">รหัสหน่วย</th>
-                            <th class="px-4 py-3.5 font-medium tracking-wide bg-[#254ab2] border-l border-[#3b5ebf]"><i class="fa-solid fa-pen-to-square text-yellow-300 mr-1"></i> ชื่อหน่วยเลือกตั้งใหม่</th>
-                            <th class="px-4 py-3.5 font-medium tracking-wide bg-[#254ab2] border-l border-[#3b5ebf]"><i class="fa-solid fa-pen-to-square text-yellow-300 mr-1"></i> สถานที่ตั้งใหม่</th>
-                            <th class="px-4 py-3.5 font-medium tracking-wide bg-[#254ab2] border-l border-[#3b5ebf]"><i class="fa-solid fa-pen-to-square text-yellow-300 mr-1"></i> URL แผนที่ (Google Maps)</th>
-                            <th class="px-4 py-3.5 font-medium tracking-wide text-center border-l border-[#1e3a8a]">จัดการ</th>
+                            <th class="px-4 py-3.5 font-medium tracking-wide border-l border-[#3b5ebf]">ชื่อสถานที่เลือกตั้ง</th>
+                            <th class="px-4 py-3.5 font-medium tracking-wide border-l border-[#3b5ebf]">ที่เลือกตั้ง</th>
+                            <th class="px-4 py-3.5 font-medium tracking-wide border-l border-[#3b5ebf]">URL แผนที่ (Google Maps)</th>
+                            <th class="px-4 py-3.5 font-medium tracking-wide text-center border-l border-[#3b5ebf]">จัดการ</th>
                         </tr>
                     </thead>
                     <tbody id="dataTableBody" class="divide-y divide-slate-200">
                         <tr>
-                            <td colspan="6" class="text-center py-16 text-slate-400">
+                            <td colspan="6" class="text-center py-20 text-slate-400">
                                 <div class="flex flex-col items-center justify-center">
                                     <div class="bg-slate-100 p-4 rounded-full mb-3">
                                         <i class="fa-solid fa-inbox text-4xl text-slate-300"></i>
@@ -163,12 +160,12 @@
                 </table>
             </div>
             <div class="bg-slate-50 p-2 text-xs text-slate-500 text-center border-t border-slate-200">
-                <i class="fa-solid fa-circle-info mr-1 text-[#eab308]"></i> ช่องที่มีพื้นหลังสีเหลืองอ่อน สามารถคลิกเพื่อพิมพ์แก้ไขข้อมูลได้ทันที
+                <i class="fa-solid fa-circle-info mr-1 text-[#eab308]"></i> กดปุ่ม <b>"แก้ไข"</b> ในคอลัมน์จัดการ เพื่อปลดล็อกและทำการปรับปรุงข้อมูล
             </div>
         </div>
     </main>
 
-    <!-- Modal: ดูประวัติการแก้ไข (Audit Trail) -->
+    <!-- Modal: History -->
     <div id="historyModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex justify-center items-center p-4 transition-opacity">
         <div class="bg-white rounded-xl shadow-2xl w-full max-w-6xl max-h-[90vh] flex flex-col overflow-hidden border border-slate-200">
             <div class="p-5 border-b flex justify-between items-center bg-teal-700 text-white">
@@ -188,14 +185,13 @@
                         </tr>
                     </thead>
                     <tbody id="historyTableBody" class="divide-y divide-slate-200 bg-white">
-                        <!-- ข้อมูลประวัติจะถูกเพิ่มด้วย JS -->
                     </tbody>
                 </table>
             </div>
         </div>
     </div>
 
-    <!-- Modal: Export SQL Scripts -->
+    <!-- Modal: Export SQL -->
     <div id="exportModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex justify-center items-center p-4">
         <div class="bg-white rounded-xl shadow-2xl w-full max-w-4xl flex flex-col overflow-hidden border border-slate-200">
             <div class="p-5 border-b flex justify-between items-center bg-slate-800 text-white">
@@ -229,7 +225,6 @@
         </div>
     </div>
 
-    <!-- นำเข้าไฟล์ JavaScript หลัก -->
     <script src="app.js"></script>
 </body>
 </html>
