@@ -276,7 +276,6 @@ async function searchData() {
     const a = document.getElementById('filterAmphur').value; 
     const txt = document.getElementById('searchInput').value.trim();
 
-    // ดึงข้อมูลแบบ Loop เพื่อให้ได้ข้อมูลครบทุกแถว (ทะลุข้อจำกัด 1000 แถว)
     let allFetchedData = [];
     let fetchFrom = 0; 
     const fetchStep = 1000; 
@@ -361,10 +360,8 @@ function renderPagination() {
     
     html += `<div class="flex items-center gap-1">`;
     
-    // ปุ่มก่อนหน้า
     html += `<button onclick="goToPage(${currentPage - 1})" class="px-3 py-1.5 border border-slate-300 rounded text-sm hover:bg-slate-100 text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed transition" ${currentPage === 1 ? 'disabled' : ''}><i class="fa-solid fa-chevron-left mr-1"></i> ก่อนหน้า</button>`;
     
-    // คำนวณตัวเลขหน้าที่จะแสดง
     let startPage = Math.max(1, currentPage - 2);
     let endPage = Math.min(totalPages, currentPage + 2);
     
@@ -385,11 +382,9 @@ function renderPagination() {
         html += `<button onclick="goToPage(${totalPages})" class="px-3 py-1.5 border border-slate-300 rounded text-sm hover:bg-slate-100 text-slate-600 transition">${totalPages}</button>`;
     }
 
-    // ปุ่มถัดไป
     html += `<button onclick="goToPage(${currentPage + 1})" class="px-3 py-1.5 border border-slate-300 rounded text-sm hover:bg-slate-100 text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed transition" ${currentPage === totalPages ? 'disabled' : ''}>ถัดไป <i class="fa-solid fa-chevron-right ml-1"></i></button>`;
     html += `</div>`;
 
-    // ใส่ HTML ตัวเดียวกันให้ทั้งคอนเทนเนอร์บนและล่าง
     containerTop.innerHTML = html;
     containerBottom.innerHTML = html;
 }
@@ -556,7 +551,6 @@ async function executeSaveData() {
         sql_script: sqlScript, updated_by: signature 
     }]);
 
-    // อัปเดตข้อมูลใน currentSearchData ให้ตรงกับที่เพิ่งบันทึก
     currentSearchData[index].polling_station_name = newName; currentSearchData[index].location_name = newLoc;
     currentSearchData[index].address = newAddr; currentSearchData[index].tambol_code = newTamCode;
     currentSearchData[index].tambol_name = newTamName; currentSearchData[index].postal_code = newZip; currentSearchData[index].location_url = newUrl;
@@ -724,7 +718,7 @@ async function executeExcelExport() {
 }
 
 // ==========================================
-// 11. ประวัติ และ Export Script (SQL)
+// 11. ประวัติ และ Export Script (SQL) (อัปเดตแก้บั๊ก 1000 แถว)
 // ==========================================
 async function openHistoryModal() {
     document.getElementById('historyModal').classList.remove('hidden');
@@ -778,6 +772,7 @@ async function openHistoryModal() {
     });
 }
 
+// [อัปเดต] ใช้ระบบ Loop ดึงข้อมูลทะลุ 1000 แถว เพื่อป้องกัน Script ขาดหาย
 function openExportModalFlow() {
     requireAdminAuth(async () => {
         document.getElementById('exportModal').classList.remove('hidden');
@@ -785,20 +780,43 @@ function openExportModalFlow() {
         if(!txt) return;
         txt.value = '-- กำลังดึงข้อมูลและประมวลผล Script...';
 
-        const { data, error } = await supabaseClient.from('station_update_logs').select('sql_script, updated_at, polling_station_code, updated_by').order('updated_at', { ascending: true });
+        try {
+            let allLogs = [];
+            let logFrom = 0; const logStep = 1000; let logHasMore = true;
             
-        if (error || !data) { txt.value = '-- Error: ดึงข้อมูลล้มเหลว'; return; }
-        if (data.length === 0) { txt.value = '-- ไม่มีประวัติการอัปเดตข้อมูลในระบบ'; return; }
+            // Loop ดึงประวัติทั้งหมด
+            while(logHasMore) {
+                const { data: logs, error: errLog } = await supabaseClient.from('station_update_logs')
+                    .select('sql_script, updated_at, polling_station_code, updated_by').order('updated_at', { ascending: true }).range(logFrom, logFrom + logStep - 1);
+                
+                if (errLog) throw errLog;
+                if (logs && logs.length > 0) { 
+                    allLogs = allLogs.concat(logs); 
+                    logFrom += logStep; 
+                    if (logs.length < logStep) logHasMore = false; 
+                } else {
+                    logHasMore = false;
+                }
+            }
 
-        const latestScriptsMap = new Map();
-        data.forEach(log => latestScriptsMap.set(log.polling_station_code, log));
-        const uniqueUpdates = Array.from(latestScriptsMap.values());
+            if (allLogs.length === 0) { txt.value = '-- ไม่มีประวัติการอัปเดตข้อมูลในระบบ'; return; }
 
-        let sql = `-- ==========================================\n-- SSO Polling Station Update Script (Deduplicated)\n-- Generated at: ${new Date().toLocaleString('th-TH')}\n-- Total Unique Updates: ${uniqueUpdates.length} stations (Filtered from ${data.length} logs)\n-- ==========================================\n\n`;
-        uniqueUpdates.forEach(log => {
-            sql += `-- Update for Station: ${log.polling_station_code} (By: ${log.updated_by || 'Unknown'} on ${new Date(log.updated_at).toLocaleString('th-TH')})\n${log.sql_script}\n\n`;
-        });
-        txt.value = sql;
+            // กรองข้อมูลซ้ำ (Deduplicate)
+            const latestScriptsMap = new Map();
+            allLogs.forEach(log => latestScriptsMap.set(String(log.polling_station_code), log));
+            const uniqueUpdates = Array.from(latestScriptsMap.values());
+
+            // สร้างโครงสร้าง Script
+            let sql = `-- ==========================================\n-- SSO Polling Station Update Script (Deduplicated)\n-- Generated at: ${new Date().toLocaleString('th-TH')}\n-- Total Unique Updates: ${uniqueUpdates.length} stations (Filtered from ${allLogs.length} logs)\n-- ==========================================\n\n`;
+            
+            uniqueUpdates.forEach(log => {
+                sql += `-- Update for Station: ${log.polling_station_code} (By: ${log.updated_by || 'Unknown'} on ${new Date(log.updated_at).toLocaleString('th-TH')})\n${log.sql_script}\n\n`;
+            });
+            txt.value = sql;
+
+        } catch (error) {
+            txt.value = '-- Error: ดึงข้อมูลล้มเหลว ' + error.message;
+        }
     });
 }
 
@@ -825,13 +843,19 @@ window.addEventListener('DOMContentLoaded', () => {
             document.getElementById('searchInput').value = '';
             document.getElementById('dataTableBody').innerHTML = `<tr><td colspan="9" class="text-center py-20 text-slate-400">กรุณาเลือกเงื่อนไขและกดค้นหา</td></tr>`;
             document.getElementById('recordCount').innerText = 'พบข้อมูล 0 รายการ';
-            document.getElementById('paginationContainer').classList.add('hidden');
+            document.getElementById('paginationContainerTop').classList.add('hidden');
+            document.getElementById('paginationContainerBottom').classList.add('hidden');
             currentSearchData = [];
             currentlyEditingCode = null; 
         });
     }
 
-    const toggleBtn = document.getElementById('btnToggleSystem'); if(toggleBtn) { toggleBtn.classList.remove('hidden'); toggleBtn.addEventListener('click', toggleSystemStatus); }
+    const toggleBtn = document.getElementById('btnToggleSystem'); 
+    if(toggleBtn) { 
+        toggleBtn.classList.remove('hidden'); 
+        toggleBtn.addEventListener('click', () => requireAdminAuth(toggleSystemStatus)); 
+    }
+    
     const btnHistory = document.getElementById('btnHistory'); if(btnHistory) btnHistory.addEventListener('click', openHistoryModal);
     const btnExport = document.getElementById('btnExport'); if(btnExport) btnExport.addEventListener('click', openExportModalFlow);
 
