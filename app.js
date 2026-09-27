@@ -74,13 +74,18 @@ async function toggleSystemStatus() {
 }
 
 // ==========================================
-// 3. ฟังก์ชันโหลดตัวกรอง (Logic ใหม่: จังหวัด -> สปส. -> อำเภอ)
+// 3. ฟังก์ชันโหลดตัวกรอง (เรียงลำดับตามรหัส Code)
 // ==========================================
 async function loadFilterOptions() {
+    // ดึงข้อมูลรหัส (Code) เข้ามาด้วย และให้ Database จัดเรียงมาให้เลย
+    // ปรับ Limit ให้สูงขึ้นเป็น 100,000 เพื่อดึงข้อมูลให้ครบทุกจังหวัด
     const { data, error } = await supabaseClient
         .from('ms_station_1')
-        .select('province_name, amphur_name, sso_name')
-        .limit(15000); 
+        .select('province_code, province_name, sso_branch_code, sso_name, amphur_code, amphur_name')
+        .order('province_code', { ascending: true })
+        .order('sso_branch_code', { ascending: true })
+        .order('amphur_code', { ascending: true })
+        .limit(100000); 
     
     if (error) {
         console.error('เกิดข้อผิดพลาดในการโหลดตัวกรอง:', error);
@@ -90,11 +95,10 @@ async function loadFilterOptions() {
     if (data) {
         filterMapping = data; 
         
-        // 1. ดึงเฉพาะชื่อจังหวัดมาแสดง
-        const provinces = [...new Set(filterMapping.map(item => item.province_name).filter(Boolean))].sort();
+        // กรองชื่อจังหวัดที่ไม่ซ้ำ โดยไม่ต้องใช้ .sort() เพื่อรักษาระเบียบการเรียงตาม province_code จาก Database
+        const provinces = [...new Set(filterMapping.map(item => item.province_name).filter(Boolean))];
         populateDropdown('filterProvince', provinces, '-- แสดงทุกจังหวัด --');
         
-        // 2. ล็อก Dropdown สปส. และ อำเภอ ไว้ก่อน
         document.getElementById('filterSSO').disabled = true;
         document.getElementById('filterAmphur').disabled = true;
     }
@@ -113,48 +117,46 @@ function setupDropdownEvents() {
     const ssoSelect = document.getElementById('filterSSO');
     const amphSelect = document.getElementById('filterAmphur');
 
-    // STEP 1: เมื่อผู้ใช้เปลี่ยน "จังหวัด" -> ให้ดึง "สปส."
+    // STEP 1: เมื่อเลือก "จังหวัด" -> ดึง "สปส."
     provSelect.addEventListener('change', (e) => {
         const selectedProv = e.target.value;
         
-        // ล้างค่าและล็อกช่อง "สปส." และ "อำเภอ" ก่อนเสมอ
         ssoSelect.innerHTML = '<option value="">-- แสดงทุกสำนักงาน --</option>';
         ssoSelect.disabled = true;
         
         amphSelect.innerHTML = '<option value="">-- แสดงทุกอำเภอ --</option>';
         amphSelect.disabled = true;
 
-        if (!selectedProv) return; // ถ้าเลือก "แสดงทุกจังหวัด" ให้หยุดแค่นี้
+        if (!selectedProv) return; 
 
-        // กรองหา "สปส." ที่อยู่ใน "จังหวัด" ที่เลือก
+        // ไม่ต้องใช้ .sort() เพื่อรักษาระเบียบการเรียงตาม sso_branch_code
         const ssos = [...new Set(filterMapping
             .filter(item => item.province_name === selectedProv && item.sso_name)
             .map(item => item.sso_name)
-        )].sort();
+        )];
 
         populateDropdown('filterSSO', ssos, '-- แสดงทุกสำนักงาน --');
-        ssoSelect.disabled = false; // ปลดล็อกให้เลือก สปส. ได้
+        ssoSelect.disabled = false;
     });
 
-    // STEP 2: เมื่อผู้ใช้เปลี่ยน "สปส." -> ให้ดึง "อำเภอ"
+    // STEP 2: เมื่อเลือก "สปส." -> ดึง "อำเภอ"
     ssoSelect.addEventListener('change', (e) => {
         const selectedProv = provSelect.value;
         const selectedSSO = e.target.value;
 
-        // ล้างค่าและล็อกช่อง "อำเภอ"
         amphSelect.innerHTML = '<option value="">-- แสดงทุกอำเภอ --</option>';
         amphSelect.disabled = true;
 
         if (!selectedSSO) return;
 
-        // กรองหา "อำเภอ" ที่รับผิดชอบโดย "สปส." (และจังหวัด) ที่เลือก
+        // ไม่ต้องใช้ .sort() เพื่อรักษาระเบียบการเรียงตาม amphur_code
         const amphurs = [...new Set(filterMapping
             .filter(item => item.province_name === selectedProv && item.sso_name === selectedSSO && item.amphur_name)
             .map(item => item.amphur_name)
-        )].sort();
+        )];
 
         populateDropdown('filterAmphur', amphurs, '-- แสดงทุกอำเภอ --');
-        amphSelect.disabled = false; // ปลดล็อกให้เลือกอำเภอได้
+        amphSelect.disabled = false;
     });
 }
 
@@ -166,7 +168,7 @@ async function searchData() {
     tableBody.innerHTML = `<tr><td colspan="6" class="text-center py-10"><i class="fa-solid fa-spinner fa-spin text-2xl text-blue-500 mb-2"></i><br>กำลังค้นหาข้อมูล...</td></tr>`;
     
     const prov = document.getElementById('filterProvince').value;
-    const sso = document.getElementById('filterSSO').value; // ลำดับค้นหาใหม่
+    const sso = document.getElementById('filterSSO').value;
     const amph = document.getElementById('filterAmphur').value;
     const searchTxt = document.getElementById('searchInput').value.trim();
 
@@ -184,7 +186,12 @@ async function searchData() {
         }
     }
 
-    const { data, error } = await query.order('province_name').order('sso_name').limit(150);
+    // จัดเรียงผลลัพธ์ในตารางตาม Code ตามที่กำหนด
+    const { data, error } = await query
+        .order('province_code', { ascending: true })
+        .order('sso_branch_code', { ascending: true })
+        .order('amphur_code', { ascending: true })
+        .limit(200);
 
     if (error) {
         console.error(error);
@@ -410,7 +417,6 @@ window.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('btnSearch').addEventListener('click', searchData);
     
-    // ล้างค่าเมื่อกดปุ่ม (เรียงตามลำดับ จังหวัด -> สปส. -> อำเภอ)
     document.getElementById('btnClear').addEventListener('click', () => {
         const provSelect = document.getElementById('filterProvince');
         const ssoSelect = document.getElementById('filterSSO');
