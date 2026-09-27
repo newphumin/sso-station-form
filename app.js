@@ -10,11 +10,10 @@ let isSystemOpen = false;
 let stationsData = []; 
 let filterMapping = []; 
 
-// ระบบ Profile ผู้ใช้
+// ระบบ Profile และ State Management
 let currentUserProfile = { name: '', sso: '' };
-
-// ตัวแปรพักข้อมูลชั่วคราวก่อนกดยืนยันบันทึก
 let pendingSaveData = null; 
+let currentlyEditingCode = null; // ตัวแปรล็อกสถานะการแก้ไข (ให้ทำได้ทีละ 1 แถว)
 
 // ==========================================
 // 2. ระบบ User Profile (Local Storage)
@@ -39,7 +38,6 @@ function updateProfileDisplay() {
             <i class="fa-solid fa-pen text-xs"></i>
         </button>
     `;
-    // เติมข้อมูลลงช่องเผื่อกดแก้
     document.getElementById('profNameInput').value = currentUserProfile.name;
     document.getElementById('profSSOInput').value = currentUserProfile.sso;
 }
@@ -99,7 +97,6 @@ async function toggleSystemStatus() {
     }
 }
 
-// โหลดตัวกรอง (Pagination วนลูป)
 async function loadFilterOptions() {
     let allData = [];
     let from = 0;
@@ -124,7 +121,6 @@ async function loadFilterOptions() {
     if (allData.length > 0) {
         filterMapping = allData; 
         
-        // กรองจังหวัด
         const provMap = new Map();
         filterMapping.forEach(i => {
             if (i.province_code && !provMap.has(i.province_code)) provMap.set(i.province_code, `${i.province_code} - ${i.province_name}`);
@@ -132,7 +128,6 @@ async function loadFilterOptions() {
         populateDropdown('filterProvince', Array.from(provMap, ([value, text]) => ({value, text})), '-- แสดงทุกจังหวัด --');
         document.getElementById('filterProvince').disabled = false;
 
-        // กรอง สปส. เพื่อใส่ในหน้า Profile Modal (เพิ่ม 1000 - ส่วนกลาง เป็นอันดับแรก)
         const ssoGlobalMap = new Map();
         filterMapping.forEach(i => {
             if (i.sso_branch_code && !ssoGlobalMap.has(i.sso_branch_code)) ssoGlobalMap.set(i.sso_branch_code, `${i.sso_branch_code} - ${i.sso_name}`);
@@ -141,7 +136,6 @@ async function loadFilterOptions() {
         Array.from(ssoGlobalMap).forEach(([v, t]) => profileSSOs.push({value: t, text: t}));
         populateDropdown('profSSOInput', profileSSOs, '-- เลือกหน่วยงานต้นสังกัด --');
         
-        // ถ้าเปิดเว็บมาละมีชื่อใน LocalStorage ให้เซ็ตค่าใส่ dropdown ไว้เลย
         if(currentUserProfile.sso) document.getElementById('profSSOInput').value = currentUserProfile.sso;
     }
 }
@@ -190,6 +184,9 @@ function setupDropdownEvents() {
 // 4. ฟังก์ชันค้นหา / ตารางข้อมูล
 // ==========================================
 async function searchData() {
+    // ล้างสถานะการแก้ไข เมื่อทำการค้นหาใหม่
+    currentlyEditingCode = null; 
+
     const tb = document.getElementById('dataTableBody');
     tb.innerHTML = `<tr><td colspan="6" class="text-center py-10"><i class="fa-solid fa-spinner fa-spin text-2xl text-blue-500 mb-2"></i><br>กำลังค้นหาข้อมูล...</td></tr>`;
     
@@ -240,37 +237,86 @@ function renderTable(data) {
             <td class="px-2 py-2">
                 <input type="text" id="url_${row.polling_station_code}" class="w-full p-2 rounded editable-input text-blue-600" value="${row.location_url || ''}" disabled>
             </td>
-            <td class="px-4 py-3 text-center w-28">
+            <td class="px-3 py-3 text-center min-w-[130px]">
+                <!-- ปุ่มแก้ไขปกติ -->
                 <button id="btn_edit_${row.polling_station_code}" onclick="enableEdit('${row.polling_station_code}')" class="btn-edit bg-orange-500 hover:bg-orange-600 text-white px-3 py-1.5 rounded shadow-sm text-xs font-bold w-full transition" ${!isSystemOpen ? 'disabled' : ''}>
                     <i class="fa-solid fa-pen mr-1"></i> แก้ไข
                 </button>
-                <button id="btn_save_${row.polling_station_code}" onclick="prepareSaveData('${row.polling_station_code}', ${idx})" class="hidden btn-save bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded shadow-sm text-xs font-bold w-full transition">
-                    <i class="fa-solid fa-save mr-1"></i> บันทึก
-                </button>
+                
+                <!-- กลุ่มปุ่ม บันทึก & ยกเลิก (ซ่อนไว้ตอนแรก) -->
+                <div id="action_group_${row.polling_station_code}" class="hidden gap-1 justify-between">
+                    <button id="btn_save_${row.polling_station_code}" onclick="prepareSaveData('${row.polling_station_code}', ${idx})" class="btn-save bg-green-600 hover:bg-green-700 text-white px-2 py-1.5 rounded shadow-sm text-xs font-bold flex-1 transition" title="บันทึก">
+                        <i class="fa-solid fa-save"></i>
+                    </button>
+                    <button id="btn_cancel_${row.polling_station_code}" onclick="cancelEdit('${row.polling_station_code}', ${idx})" class="btn-cancel bg-slate-500 hover:bg-slate-600 text-white px-2 py-1.5 rounded shadow-sm text-xs font-bold flex-1 transition" title="ยกเลิกการแก้ไข">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
             </td>
         `;
         tb.appendChild(tr);
     });
 }
 
+// ----------------------------------------------------
+// ระบบล็อคการแก้ไข (State Locking)
+// ----------------------------------------------------
 function enableEdit(code) {
     if (!isSystemOpen) { alert('ระบบปิดรับข้อมูลแล้ว ไม่สามารถแก้ไขได้'); return; }
+    
+    // ตรวจสอบว่ามีการแก้ไขค้างไว้อยู่หรือไม่
+    if (currentlyEditingCode !== null && currentlyEditingCode !== code) {
+        alert(`กรุณา "บันทึก" หรือ "ยกเลิก" ข้อมูลที่กำลังแก้ไขอยู่ให้เสร็จสิ้นก่อน (รหัส: ${currentlyEditingCode})`);
+        return;
+    }
+    
+    currentlyEditingCode = code; // ล็อกเป้าหมาย
+    
     const ids = [`name_${code}`, `loc_${code}`, `url_${code}`];
     ids.forEach(id => {
         const el = document.getElementById(id);
         el.disabled = false;
         el.classList.add('bg-yellow-50', 'border-yellow-300');
     });
+    
     document.getElementById(`btn_edit_${code}`).classList.add('hidden');
-    document.getElementById(`btn_save_${code}`).classList.remove('hidden');
+    
+    const actionGroup = document.getElementById(`action_group_${code}`);
+    actionGroup.classList.remove('hidden');
+    actionGroup.classList.add('flex');
+    
     document.getElementById(ids[0]).focus();
 }
+
+function cancelEdit(code, index) {
+    const oldData = stationsData[index];
+    
+    // คืนค่าเดิมจากตัวแปร Local
+    document.getElementById(`name_${code}`).value = oldData.polling_station_name || '';
+    document.getElementById(`loc_${code}`).value = oldData.location_name || '';
+    document.getElementById(`url_${code}`).value = oldData.location_url || '';
+
+    // ล็อกช่อง Input กลับคืน
+    const ids = [`name_${code}`, `loc_${code}`, `url_${code}`];
+    ids.forEach(id => {
+        const el = document.getElementById(id);
+        el.disabled = true;
+        el.classList.remove('bg-yellow-50', 'border-yellow-300');
+    });
+
+    // สลับปุ่มกลับเป็น "แก้ไข"
+    const actionGroup = document.getElementById(`action_group_${code}`);
+    actionGroup.classList.remove('flex');
+    actionGroup.classList.add('hidden');
+    document.getElementById(`btn_edit_${code}`).classList.remove('hidden');
+
+    currentlyEditingCode = null; // ปลดล็อกเป้าหมาย ให้ไปแก้บรรทัดอื่นต่อได้
+}
+
 
 // ==========================================
 // 5. ระบบตรวจสอบและบันทึกข้อมูล (Confirmation Modal)
 // ==========================================
-
-// ฟังก์ชันดักเปรียบเทียบข้อมูลเพื่อโชว์ใน Modal
 function prepareSaveData(code, index) {
     if (!isSystemOpen) return;
     const oldData = stationsData[index];
@@ -283,25 +329,19 @@ function prepareSaveData(code, index) {
         return;
     }
 
-    // เก็บค่าลงตัวแปรชั่วคราวรอผู้ใช้กดยืนยัน
     pendingSaveData = { code, index, oldData, newName, newLoc, newUrl };
 
-    // นำข้อมูลไปหยอดใส่ Modal คอนเฟิร์ม
     document.getElementById('confirmCodeBadge').innerText = `รหัส: ${code}`;
-    
     setConfirmRow('Name', oldData.polling_station_name, newName);
     setConfirmRow('Loc', oldData.location_name, newLoc);
     setConfirmRow('Url', oldData.location_url, newUrl);
 
-    // ลายเซ็นผู้ทำรายการ
     const signatureText = `${currentUserProfile.name} [${currentUserProfile.sso}]`;
     document.getElementById('confSignature').innerHTML = `<i class="fa-solid fa-user-pen mr-1 text-[#1e3a8a]"></i> บันทึกรายการโดย: <span class="font-semibold text-[#1e3a8a]">${signatureText}</span>`;
 
-    // เปิด Modal
     document.getElementById('confirmSaveModal').classList.remove('hidden');
 }
 
-// ฟังก์ชันเทียบสีไฮไลท์เขียวเฉพาะฟิลด์ที่เปลี่ยน
 function setConfirmRow(field, oldVal, newVal) {
     const oldEl = document.getElementById(`confOld${field}`);
     const newEl = document.getElementById(`confNew${field}`);
@@ -320,9 +360,9 @@ function setConfirmRow(field, oldVal, newVal) {
 function closeConfirmModal() {
     document.getElementById('confirmSaveModal').classList.add('hidden');
     pendingSaveData = null;
+    // หากกดยกเลิกจาก Modal ข้อมูลหน้าตารางจะยังคงอยู่ในสถานะพิมพ์ค้างไว้ให้แก้ไขต่อได้ (ไม่คืนค่า)
 }
 
-// ผู้ใช้กดยืนยันจาก Modal ค่อยยิง Database
 document.getElementById('btnConfirmExecute').addEventListener('click', async () => {
     if (!pendingSaveData) return;
     const { code, index, oldData, newName, newLoc, newUrl } = pendingSaveData;
@@ -332,7 +372,7 @@ document.getElementById('btnConfirmExecute').addEventListener('click', async () 
     btnEx.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> กำลังบันทึก...';
 
     const sqlScript = `UPDATE ms_station_1 SET polling_station_name = '${escapeSQL(newName)}', location_name = '${escapeSQL(newLoc)}', location_url = '${escapeSQL(newUrl)}' WHERE polling_station_code = '${code}';`;
-    const signature = `${currentUserProfile.name} [${currentUserProfile.sso}]`; // รูปแบบ: ชื่อ-นามสกุล [รหัส - สังกัด]
+    const signature = `${currentUserProfile.name} [${currentUserProfile.sso}]`;
 
     const { error: updateError } = await supabaseClient.from('ms_station_1')
         .update({ polling_station_name: newName, location_name: newLoc, location_url: newUrl })
@@ -357,7 +397,7 @@ document.getElementById('btnConfirmExecute').addEventListener('click', async () 
         updated_by: signature 
     }]);
 
-    // สำเร็จ! อัปเดต UI กลับเป็นปกติ
+    // สำเร็จ! อัปเดตข้อมูล Local ให้ตรงกับฐานข้อมูล
     stationsData[index].polling_station_name = newName;
     stationsData[index].location_name = newLoc;
     stationsData[index].location_url = newUrl;
@@ -369,9 +409,14 @@ document.getElementById('btnConfirmExecute').addEventListener('click', async () 
         el.classList.remove('bg-yellow-50', 'border-yellow-300');
     });
 
-    document.getElementById(`btn_save_${code}`).classList.add('hidden');
+    // ปรับ UI ปุ่มกลับเป็นสถานะปกติ
+    const actionGroup = document.getElementById(`action_group_${code}`);
+    actionGroup.classList.remove('flex');
+    actionGroup.classList.add('hidden');
     document.getElementById(`btn_edit_${code}`).classList.remove('hidden');
 
+    currentlyEditingCode = null; // ปลดล็อกเป้าหมาย ให้แก้บรรทัดอื่นต่อได้
+    
     btnEx.disabled = false;
     btnEx.innerHTML = '<i class="fa-solid fa-save"></i> ยืนยันการบันทึก';
     closeConfirmModal();
@@ -379,8 +424,9 @@ document.getElementById('btnConfirmExecute').addEventListener('click', async () 
 
 function escapeSQL(val) { return !val ? '' : val.replace(/'/g, "''"); }
 
+
 // ==========================================
-// 6. ประวัติ (History) และ Export
+// 6. ประวัติ (History) และ Export (Script Deduplication)
 // ==========================================
 async function openHistoryModal() {
     document.getElementById('historyModal').classList.remove('hidden');
@@ -404,19 +450,41 @@ async function openHistoryModal() {
     });
 }
 
+// ระบบดึง Export Script (ใช้ Map กรองเอาเฉพาะข้อมูลล่าสุดของรหัสนั้นๆ ป้องกัน Script ซ้ำซ้อน)
 async function openExportModal() {
     document.getElementById('exportModal').classList.remove('hidden');
     const txt = document.getElementById('sqlOutputArea');
     txt.value = '-- กำลังดึงข้อมูล...';
 
-    const { data, error } = await supabaseClient.from('station_update_logs').select('sql_script, updated_at, polling_station_code, updated_by').order('updated_at', { ascending: true });
-    if (error || !data) { txt.value = '-- Error'; return; }
-    if (data.length === 0) { txt.value = '-- ไม่มีประวัติ'; return; }
+    // ดึงเรียงตามเวลา เก่า -> ใหม่
+    const { data, error } = await supabaseClient
+        .from('station_update_logs')
+        .select('sql_script, updated_at, polling_station_code, updated_by')
+        .order('updated_at', { ascending: true });
+        
+    if (error || !data) { txt.value = '-- Error: ดึงข้อมูลล้มเหลว'; return; }
+    if (data.length === 0) { txt.value = '-- ไม่มีประวัติการอัปเดตข้อมูลในระบบ'; return; }
 
-    let sql = `-- ==========================================\n-- SSO Polling Station Update Script\n-- Generated at: ${new Date().toLocaleString('th-TH')}\n-- Total Updates: ${data.length} records\n-- ==========================================\n\n`;
+    // ตะแกรงกรอง (Script Deduplication): 
+    // พอเจอข้อมูลใหม่กว่าของรหัสเดิม Map จะถูกบันทึกทับ (Overwrite) ทำให้เหลือแต่คำสั่งล่าสุดจริงๆ
+    const latestScriptsMap = new Map();
     data.forEach(log => {
-        sql += `-- Update for Station: ${log.polling_station_code} (By: ${log.updated_by || 'Unknown'} on ${new Date(log.updated_at).toLocaleString('th-TH')})\n${log.sql_script}\n\n`;
+        latestScriptsMap.set(log.polling_station_code, log);
     });
+
+    const uniqueUpdates = Array.from(latestScriptsMap.values());
+
+    let sql = `-- ==========================================\n`;
+    sql += `-- SSO Polling Station Update Script (Deduplicated)\n`;
+    sql += `-- Generated at: ${new Date().toLocaleString('th-TH')}\n`;
+    sql += `-- Total Unique Updates: ${uniqueUpdates.length} stations (Filtered from ${data.length} logs)\n`;
+    sql += `-- ==========================================\n\n`;
+
+    uniqueUpdates.forEach(log => {
+        sql += `-- Update for Station: ${log.polling_station_code} (By: ${log.updated_by || 'Unknown'} on ${new Date(log.updated_at).toLocaleString('th-TH')})\n`;
+        sql += `${log.sql_script}\n\n`;
+    });
+
     txt.value = sql;
 }
 
@@ -448,6 +516,8 @@ window.addEventListener('DOMContentLoaded', () => {
         document.getElementById('searchInput').value = '';
         document.getElementById('dataTableBody').innerHTML = `<tr><td colspan="6" class="text-center py-16 text-slate-400">กรุณาเลือกเงื่อนไขและกดค้นหา</td></tr>`;
         document.getElementById('recordCount').innerText = 'พบข้อมูล 0 รายการ';
+        
+        currentlyEditingCode = null; // ปลดล็อกการแก้ไข
     });
 
     const toggleBtn = document.getElementById('btnToggleSystem');
