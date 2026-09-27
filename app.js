@@ -434,7 +434,6 @@ async function executeSaveData() {
 
     if (updateError) { customAlert('บันทึกไม่สำเร็จ', updateError.message, 'error'); btnEx.disabled = false; btnEx.innerHTML = '<i class="fa-solid fa-save"></i> ยืนยันการบันทึก'; return; }
 
-    // อัปเดตโครงสร้าง Log ให้ครบถ้วนตาม SQL ใหม่
     await supabaseClient.from('station_update_logs').insert([{
         polling_station_code: code.toString(),
         old_station_name: oldData.polling_station_name, new_station_name: newName,
@@ -463,7 +462,7 @@ async function executeSaveData() {
 }
 
 // ==========================================
-// 10. ระบบ Export Excel (แก้บั๊ก Type Mismatch)
+// 10. ระบบ Export Excel (อัปเดตแกะข้อจำกัด 1000 แถว & เพิ่มคอลัมน์)
 // ==========================================
 function openExcelModalFlow() {
     const pSel = document.getElementById('excelFilterProvince');
@@ -510,44 +509,70 @@ async function executeExcelExport() {
         const s = document.getElementById('excelFilterSSO').value;
         const a = document.getElementById('excelFilterAmphur').value;
 
-        // 1. ดึงข้อมูล Master Stations
-        let q = supabaseClient.from('ms_station_1').select('polling_station_code, province_name, amphur_name, sso_name');
-        if (p) q = q.eq('province_code', p);
-        if (s) q = q.eq('sso_branch_code', s);
-        if (a) q = q.eq('amphur_code', a);
-        const { data: stations, error: err1 } = await q;
-        if (err1) throw err1;
+        // ขั้นตอนที่ 1: ดึงประวัติ Logs ทั้งหมด (ใช้ Loop เพื่อป้องกันติด Limit 1000 แถว)
+        let allLogs = [];
+        let logFrom = 0; const logStep = 1000; let logHasMore = true;
+        while(logHasMore) {
+            const { data: logs, error: errLog } = await supabaseClient.from('station_update_logs')
+                .select('*').order('updated_at', { ascending: true }).range(logFrom, logFrom + logStep - 1);
+            if (errLog) throw errLog;
+            if (logs && logs.length > 0) { allLogs = allLogs.concat(logs); logFrom += logStep; if (logs.length < logStep) logHasMore = false; } else logHasMore = false;
+        }
 
-        // 2. ดึงประวัติ Logs ทั้งหมด (เรียงตามเวลา เก่า -> ใหม่)
-        const { data: logs, error: err2 } = await supabaseClient.from('station_update_logs').select('*').order('updated_at', { ascending: true });
-        if (err2) throw err2;
-
-        // [จุดที่แก้บั๊ก] บังคับแปลงรหัสเป็น String เสมอ
+        // ตัดข้อมูลซ้ำ (Deduplication) หาอัปเดตล่าสุด
         const latestLogs = new Map();
-        logs.forEach(log => {
-            // สำคัญมาก: แปลงรหัสให้อยู่ในรูป String เพื่อป้องกัน Type Mismatch
+        allLogs.forEach(log => {
             latestLogs.set(String(log.polling_station_code), log);
         });
 
-        // 3. จับคู่ข้อมูล
+        if (latestLogs.size === 0) {
+            customAlert('ไม่พบข้อมูล', 'ไม่มีประวัติการแก้ไขข้อมูลสถานที่เลือกตั้งในระบบ', 'warning');
+            btnEx.disabled = false; btnEx.innerHTML = '<i class="fa-solid fa-download"></i> ดาวน์โหลด Excel';
+            return;
+        }
+
+        // ขั้นตอนที่ 2: ดึงข้อมูล Master Stations ตามตัวกรอง (ใช้ Loop เช่นกัน)
+        let allStations = [];
+        let stFrom = 0; const stStep = 1000; let stHasMore = true;
+        while (stHasMore) {
+            let q = supabaseClient.from('ms_station_1').select('polling_station_code, province_name, amphur_name, sso_name').range(stFrom, stFrom + stStep - 1);
+            if (p) q = q.eq('province_code', p);
+            if (s) q = q.eq('sso_branch_code', s);
+            if (a) q = q.eq('amphur_code', a);
+            
+            const { data: stations, error: errSt } = await q;
+            if (errSt) throw errSt;
+            if (stations && stations.length > 0) { allStations = allStations.concat(stations); stFrom += stStep; if (stations.length < stStep) stHasMore = false; } else stHasMore = false;
+        }
+
+        // ขั้นตอนที่ 3: จับคู่ข้อมูลและสร้างโครงสร้าง Excel (แบบมี [เดิม] และ [ใหม่])
         const excelData = [];
-        stations.forEach(st => {
-            // แปลงรหัสจากตาราง ms_station_1 ให้เป็น String เพื่อใช้ค้นหาใน Map
+        allStations.forEach(st => {
             const codeStr = String(st.polling_station_code);
             
             if (latestLogs.has(codeStr)) {
                 const log = latestLogs.get(codeStr);
+                const dStr = new Date(log.updated_at).toLocaleString('th-TH');
+                
                 excelData.push({
                     "จังหวัด": st.province_name || '',
+                    "สำนักงาน สปส.": st.sso_name || '',
                     "อำเภอ": st.amphur_name || '',
-                    "สปส.": st.sso_name || '',
                     "รหัสหน่วย": codeStr,
-                    "ชื่อสถานที่เลือกตั้ง": log.new_station_name || '',
-                    "ที่เลือกตั้ง": log.new_location_name || '',
-                    "ที่อยู่": log.new_address || '',
-                    "ตำบล (แขวง)": log.new_tambol_name || '',
-                    "ไปรษณีย์": log.new_postal_code || '',
-                    "URL แผนที่ (Google Maps)": log.new_location_url || ''
+                    "[เดิม] ชื่อสถานที่เลือกตั้ง": log.old_station_name || '',
+                    "[ใหม่] ชื่อสถานที่เลือกตั้ง": log.new_station_name || '',
+                    "[เดิม] ที่เลือกตั้ง": log.old_location_name || '',
+                    "[ใหม่] ที่เลือกตั้ง": log.new_location_name || '',
+                    "[เดิม] ที่อยู่": log.old_address || '',
+                    "[ใหม่] ที่อยู่": log.new_address || '',
+                    "[เดิม] ตำบล (แขวง)": log.old_tambol_name || '',
+                    "[ใหม่] ตำบล (แขวง)": log.new_tambol_name || '',
+                    "[เดิม] รหัสไปรษณีย์": log.old_postal_code || '',
+                    "[ใหม่] รหัสไปรษณีย์": log.new_postal_code || '',
+                    "[เดิม] URL แผนที่": log.old_location_url || '',
+                    "[ใหม่] URL แผนที่": log.new_location_url || '',
+                    "ผู้แก้ไขล่าสุด": log.updated_by || '',
+                    "วัน/เวลาที่แก้ไขล่าสุด": dStr
                 });
             }
         });
@@ -558,9 +583,20 @@ async function executeExcelExport() {
             return;
         }
 
-        // 4. สร้าง Excel
+        // ขั้นตอนที่ 4: ใช้ SheetJS สร้างไฟล์ Excel
         const worksheet = XLSX.utils.json_to_sheet(excelData);
-        const wscols = [{wch: 15}, {wch: 15}, {wch: 30}, {wch: 12}, {wch: 30}, {wch: 30}, {wch: 25}, {wch: 20}, {wch: 10}, {wch: 40}];
+        
+        // ปรับความกว้างคอลัมน์ให้อ่านง่าย
+        const wscols = [
+            {wch: 15}, {wch: 25}, {wch: 15}, {wch: 12}, 
+            {wch: 30}, {wch: 30}, // ชื่อ
+            {wch: 25}, {wch: 25}, // ที่เลือกตั้ง
+            {wch: 25}, {wch: 25}, // ที่อยู่
+            {wch: 15}, {wch: 15}, // ตำบล
+            {wch: 12}, {wch: 12}, // ไปรษณีย์
+            {wch: 35}, {wch: 35}, // URL
+            {wch: 20}, {wch: 20}  // ผู้แก้/เวลา
+        ];
         worksheet['!cols'] = wscols;
 
         const workbook = XLSX.utils.book_new();
@@ -581,7 +617,7 @@ async function executeExcelExport() {
 }
 
 // ==========================================
-// อัปเดตฟังก์ชัน History ให้แสดงข้อมูลที่อยู่และตำบลด้วย
+// 11. ประวัติ และ Export Script (SQL)
 // ==========================================
 async function openHistoryModal() {
     document.getElementById('historyModal').classList.remove('hidden');
@@ -594,21 +630,14 @@ async function openHistoryModal() {
     tb.innerHTML = '';
     data.forEach(log => {
         const dStr = new Date(log.updated_at).toLocaleString('th-TH');
-        
-        // จัดการรูปแบบที่อยู่เดิม
         let oldAddressFull = `${log.old_address || '-'} ต.${log.old_tambol_name || '-'} ${log.old_postal_code || '-'}`;
         if(oldAddressFull === '- ต.- -') oldAddressFull = '-';
-        
-        // จัดการรูปแบบที่อยู่ใหม่
         let newAddressFull = `${log.new_address || '-'} ต.${log.new_tambol_name || '-'} ${log.new_postal_code || '-'}`;
         if(newAddressFull === '- ต.- -') newAddressFull = '-';
 
         tb.innerHTML += `
             <tr class="hover:bg-slate-50">
-                <td class="p-3 border-b text-xs text-slate-500 min-w-[120px]">
-                    ${dStr}<br>
-                    <span class="font-semibold text-slate-700 mt-1 inline-block"><i class="fa-solid fa-user-pen mr-1"></i>${log.updated_by || 'Unknown'}</span>
-                </td>
+                <td class="p-3 border-b text-xs text-slate-500 min-w-[120px]">${dStr}<br><span class="font-semibold text-slate-700 mt-1 inline-block"><i class="fa-solid fa-user-pen mr-1"></i>${log.updated_by || 'Unknown'}</span></td>
                 <td class="p-3 border-b font-semibold text-[#1e3a8a] text-center">${log.polling_station_code}</td>
                 <td class="p-3 border-b text-xs text-slate-500">
                     <div class="mb-1"><span class="font-semibold">ชื่อ:</span> ${log.old_station_name || '-'}</div>
