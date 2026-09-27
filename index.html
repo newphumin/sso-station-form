@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ระบบบริหารจัดการข้อมูลสถานที่เลือกตั้ง - สำนักงานประกันสังคม</title>
+    <!-- เพิ่ม Favicon โลโก้ สปส. จำลองบนแท็บเบราว์เซอร์ -->
+    <link rel="icon" href="https://cdn-icons-png.flaticon.com/512/3135/3135715.png" type="image/png">
+    
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Supabase JS Client -->
@@ -44,7 +47,6 @@
     <header class="bg-[#1e3a8a] text-white shadow-md border-b-4 border-[#eab308] sticky top-0 z-40">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
             <div class="flex items-center gap-3">
-                <!-- โลโก้จำลอง (สามารถเปลี่ยนเป็นแท็ก <img> ใส่โลโก้ สปส. จริงได้) -->
                 <div class="bg-white text-[#1e3a8a] p-2 rounded-full w-10 h-10 flex items-center justify-center font-bold text-lg shadow-sm">
                     <i class="fa-solid fa-users"></i>
                 </div>
@@ -130,14 +132,12 @@
                 <span id="recordCount" class="text-sm font-medium text-slate-500 bg-slate-200 px-3 py-1 rounded-full">พบข้อมูล 0 รายการ</span>
             </div>
             
-            <!-- ตาราง (Scroll ได้) -->
             <div class="overflow-auto flex-grow relative">
                 <table class="w-full text-sm text-left whitespace-nowrap">
                     <thead class="bg-[#1e3a8a] text-white sticky top-0 z-10 shadow-sm">
                         <tr>
                             <th class="px-4 py-3.5 font-medium tracking-wide">พื้นที่ / สปส.</th>
                             <th class="px-4 py-3.5 font-medium tracking-wide">รหัสหน่วย</th>
-                            <!-- ช่องที่ให้แก้ไขได้ ทำสีหัวตารางให้ต่างออกไปเล็กน้อย -->
                             <th class="px-4 py-3.5 font-medium tracking-wide bg-[#254ab2] border-l border-[#3b5ebf]"><i class="fa-solid fa-pen-to-square text-yellow-300 mr-1"></i> ชื่อหน่วยเลือกตั้งใหม่</th>
                             <th class="px-4 py-3.5 font-medium tracking-wide bg-[#254ab2] border-l border-[#3b5ebf]"><i class="fa-solid fa-pen-to-square text-yellow-300 mr-1"></i> สถานที่ตั้งใหม่</th>
                             <th class="px-4 py-3.5 font-medium tracking-wide bg-[#254ab2] border-l border-[#3b5ebf]"><i class="fa-solid fa-pen-to-square text-yellow-300 mr-1"></i> URL แผนที่ (Google Maps)</th>
@@ -155,16 +155,6 @@
                                 </div>
                             </td>
                         </tr>
-                        <!-- ตัวอย่าง Mockup แถวข้อมูล (จะถูกแทนที่ด้วย JS) 
-                        <tr class="hover:bg-slate-50 transition">
-                            <td class="px-4 py-3 text-slate-600 text-xs whitespace-normal min-w-[200px]">นนทบุรี > เมืองนนทบุรี<br><span class="font-semibold text-slate-800">สปส. นนทบุรี สาขาเมือง</span></td>
-                            <td class="px-4 py-3 font-semibold text-[#1e3a8a]">1201001</td>
-                            <td class="px-2 py-2 bg-yellow-50/50"><input type="text" class="w-full p-2 rounded editable-input text-slate-800" value="โรงเรียนสตรีนนทบุรี"></td>
-                            <td class="px-2 py-2 bg-yellow-50/50"><input type="text" class="w-full p-2 rounded editable-input text-slate-800" value="หอประชุมใหญ่"></td>
-                            <td class="px-2 py-2 bg-yellow-50/50"><input type="text" class="w-full p-2 rounded editable-input text-blue-600" value="https://maps.google.com/..."></td>
-                            <td class="px-4 py-3 text-center"><button class="bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded shadow-sm text-xs font-bold w-full"><i class="fa-solid fa-save mr-1"></i> บันทึก</button></td>
-                        </tr>
-                        -->
                     </tbody>
                 </table>
             </div>
@@ -172,7 +162,6 @@
                 <i class="fa-solid fa-circle-info mr-1 text-[#eab308]"></i> ช่องที่มีพื้นหลังสีเหลืองอ่อน สามารถคลิกเพื่อพิมพ์แก้ไขข้อมูลได้ทันที
             </div>
         </div>
-
     </main>
 
     <!-- Modal: ดูประวัติการแก้ไข (Audit Trail) -->
@@ -218,14 +207,12 @@
                         <p class="text-xs text-slate-500">ตรวจสอบความถูกต้องก่อนนำไฟล์ .sql ไป Execute ในระบบหลักของสำนักงาน</p>
                     </div>
                 </div>
-                <!-- กล่องแสดง Code คล้าย Editor -->
                 <div class="bg-[#1e1e1e] rounded-lg p-1 border border-slate-300 shadow-inner mb-5">
                     <div class="flex items-center gap-2 px-3 py-2 border-b border-gray-700 bg-[#2d2d2d] rounded-t-md text-gray-400 text-xs">
                         <i class="fa-brands fa-square-font-awesome-stroke"></i> update_script.sql
                     </div>
                     <textarea id="sqlOutputArea" readonly class="w-full h-72 font-mono text-sm bg-[#1e1e1e] text-green-400 p-4 rounded-b-md focus:outline-none resize-none leading-relaxed" spellcheck="false" placeholder="-- กรุณารอสักครู่ ระบบกำลังสร้าง Script..."></textarea>
                 </div>
-                
                 <div class="flex justify-end gap-3">
                     <button onclick="document.getElementById('exportModal').classList.add('hidden')" class="bg-white text-slate-700 px-5 py-2.5 rounded-lg border border-slate-300 hover:bg-slate-50 font-medium">
                         ยกเลิก
