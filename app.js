@@ -268,28 +268,50 @@ async function searchData() {
     const tb = document.getElementById('dataTableBody');
     if(!tb) return;
     tb.innerHTML = `<tr><td colspan="9" class="text-center py-10"><i class="fa-solid fa-spinner fa-spin text-2xl text-blue-500 mb-2"></i><br>กำลังค้นหาข้อมูล...</td></tr>`;
-    document.getElementById('paginationContainer').classList.add('hidden');
+    document.getElementById('paginationContainerTop').classList.add('hidden');
+    document.getElementById('paginationContainerBottom').classList.add('hidden');
     
-    const p = document.getElementById('filterProvince').value; const s = document.getElementById('filterSSO').value;
-    const a = document.getElementById('filterAmphur').value; const txt = document.getElementById('searchInput').value.trim();
+    const p = document.getElementById('filterProvince').value; 
+    const s = document.getElementById('filterSSO').value;
+    const a = document.getElementById('filterAmphur').value; 
+    const txt = document.getElementById('searchInput').value.trim();
 
-    let query = supabaseClient.from('ms_station_1').select('*');
-    if (p) query = query.eq('province_code', p);
-    if (s) query = query.eq('sso_branch_code', s);
-    if (a) query = query.eq('amphur_code', a);
-    if (txt) {
-        if (!isNaN(txt) && txt !== '') query = query.or(`polling_station_code.eq.${txt},polling_station_name.ilike.%${txt}%`);
-        else query = query.ilike('polling_station_name', `%${txt}%`);
+    // ดึงข้อมูลแบบ Loop เพื่อให้ได้ข้อมูลครบทุกแถว (ทะลุข้อจำกัด 1000 แถว)
+    let allFetchedData = [];
+    let fetchFrom = 0; 
+    const fetchStep = 1000; 
+    let hasMoreData = true;
+
+    try {
+        while (hasMoreData) {
+            let query = supabaseClient.from('ms_station_1').select('*');
+            if (p) query = query.eq('province_code', p);
+            if (s) query = query.eq('sso_branch_code', s);
+            if (a) query = query.eq('amphur_code', a);
+            if (txt) {
+                if (!isNaN(txt) && txt !== '') query = query.or(`polling_station_code.eq.${txt},polling_station_name.ilike.%${txt}%`);
+                else query = query.ilike('polling_station_name', `%${txt}%`);
+            }
+
+            const { data, error } = await query.order('polling_station_code', { ascending: true }).range(fetchFrom, fetchFrom + fetchStep - 1);
+            
+            if (error) throw error;
+            if (data && data.length > 0) { 
+                allFetchedData = allFetchedData.concat(data); 
+                fetchFrom += fetchStep; 
+                if (data.length < fetchStep) hasMoreData = false; 
+            } else {
+                hasMoreData = false;
+            }
+        }
+    } catch (err) {
+        tb.innerHTML = `<tr><td colspan="9" class="text-center py-10 text-red-500">Error: ${err.message}</td></tr>`; 
+        return;
     }
 
-    // ดึงข้อมูลทั้งหมดที่ตรงกับตัวกรอง (ขยายขีดจำกัดเพื่อให้คลุมทั้งหมด)
-    const { data, error } = await query.order('polling_station_code', { ascending: true }).limit(5000);
-    
-    if (error) { tb.innerHTML = `<tr><td colspan="9" class="text-center py-10 text-red-500">Error: ${error.message}</td></tr>`; return; }
-
-    currentSearchData = data;
+    currentSearchData = allFetchedData;
     currentPage = 1;
-    document.getElementById('recordCount').innerText = `พบข้อมูล ${data.length} รายการ`;
+    document.getElementById('recordCount').innerText = `พบข้อมูล ${currentSearchData.length} รายการ`;
     
     renderCurrentPage();
 }
@@ -303,7 +325,6 @@ function renderCurrentPage() {
     renderPagination();
 }
 
-// ผูกฟังก์ชัน goToPage ให้ใช้งานได้ที่ระดับ Window
 window.goToPage = function(page) {
     const totalPages = Math.ceil(currentSearchData.length / itemsPerPage);
     if (page < 1 || page > totalPages) return;
@@ -318,17 +339,20 @@ window.goToPage = function(page) {
 };
 
 function renderPagination() {
-    const container = document.getElementById('paginationContainer');
-    if (!container) return;
+    const containerTop = document.getElementById('paginationContainerTop');
+    const containerBottom = document.getElementById('paginationContainerBottom');
+    if (!containerTop || !containerBottom) return;
     
     const totalPages = Math.ceil(currentSearchData.length / itemsPerPage);
     
     if (currentSearchData.length === 0) {
-        container.classList.add('hidden');
+        containerTop.classList.add('hidden');
+        containerBottom.classList.add('hidden');
         return;
     }
 
-    container.classList.remove('hidden');
+    containerTop.classList.remove('hidden');
+    containerBottom.classList.remove('hidden');
 
     const startItem = ((currentPage - 1) * itemsPerPage) + 1;
     const endItem = Math.min(currentPage * itemsPerPage, currentSearchData.length);
@@ -340,7 +364,7 @@ function renderPagination() {
     // ปุ่มก่อนหน้า
     html += `<button onclick="goToPage(${currentPage - 1})" class="px-3 py-1.5 border border-slate-300 rounded text-sm hover:bg-slate-100 text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed transition" ${currentPage === 1 ? 'disabled' : ''}><i class="fa-solid fa-chevron-left mr-1"></i> ก่อนหน้า</button>`;
     
-    // คำนวณตัวเลขหน้าที่จะแสดง (โชว์รอบๆ หน้าปัจจุบัน)
+    // คำนวณตัวเลขหน้าที่จะแสดง
     let startPage = Math.max(1, currentPage - 2);
     let endPage = Math.min(totalPages, currentPage + 2);
     
@@ -363,9 +387,11 @@ function renderPagination() {
 
     // ปุ่มถัดไป
     html += `<button onclick="goToPage(${currentPage + 1})" class="px-3 py-1.5 border border-slate-300 rounded text-sm hover:bg-slate-100 text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed transition" ${currentPage === totalPages ? 'disabled' : ''}>ถัดไป <i class="fa-solid fa-chevron-right ml-1"></i></button>`;
-    
     html += `</div>`;
-    container.innerHTML = html;
+
+    // ใส่ HTML ตัวเดียวกันให้ทั้งคอนเทนเนอร์บนและล่าง
+    containerTop.innerHTML = html;
+    containerBottom.innerHTML = html;
 }
 
 function renderTable(data, startIndex) {
@@ -374,7 +400,6 @@ function renderTable(data, startIndex) {
     if (data.length === 0) { tb.innerHTML = `<tr><td colspan="9" class="text-center py-16 text-slate-400">ไม่พบข้อมูลที่ตรงกับเงื่อนไข</td></tr>`; return; }
 
     data.forEach((row, idx) => {
-        // ใช้ absoluteIndex เพื่อให้ปุ่มอ้างอิงไปที่ข้อมูลก้อนหลักได้ถูกต้อง
         const absoluteIndex = startIndex + idx;
         const tr = document.createElement('tr');
         tr.className = 'hover:bg-slate-50 transition border-b border-slate-100 relative';
@@ -390,7 +415,6 @@ function renderTable(data, startIndex) {
             });
         } else tambolOptionsHTML = `<option value="">-- ไม่มีข้อมูลตำบล --</option>`;
 
-        // เพิ่ม min-w-0 และ w-full ให้ input เพื่อไม่ให้ดันตารางกว้างเกินไป
         tr.innerHTML = `
             <td class="px-3 py-3 text-slate-600 text-xs whitespace-normal break-words">${row.province_code || ''} - ${row.province_name || '-'} > ${row.amphur_name || '-'}<br><span class="font-semibold text-slate-800">${row.sso_branch_code || ''} - ${row.sso_name || '-'}</span></td>
             <td class="px-2 py-3 font-semibold text-[#1e3a8a] whitespace-nowrap">${row.polling_station_code}</td>
