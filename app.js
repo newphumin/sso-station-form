@@ -28,6 +28,10 @@ async function checkSystemStatus() {
         updateSystemUI();
     } catch (err) {
         console.error('Error checking system status:', err);
+        // เพิ่มการเปลี่ยนป้ายสถานะเป็นสีแดงเมื่อเชื่อมต่อฐานข้อมูลล้มเหลว
+        const badge = document.getElementById('systemStatusBadge');
+        badge.innerHTML = '<i class="fa-solid fa-triangle-exclamation text-red-400"></i> เชื่อมต่อฐานข้อมูลล้มเหลว (เช็ค RLS)';
+        badge.className = 'px-3 py-1.5 rounded-full text-sm font-semibold bg-red-900/80 text-white border border-red-700 shadow-sm flex items-center gap-2';
     }
 }
 
@@ -73,8 +77,14 @@ async function toggleSystemStatus() {
 // ==========================================
 // หมายเหตุ: เพื่อความง่ายในการสอน เราดึงแบบรวบยอด แต่ถ้าข้อมูลเยอะควรทำ API แยก
 async function loadFilterOptions() {
-    // โหลดข้อมูลแบบ Distinct มาใส่ Dropdown (ใช้ Set จัดการค่าซ้ำฝั่ง JS)
     const { data, error } = await supabase.from('ms_station_1').select('province_name, amphur_name, sso_name');
+    
+    // เพิ่มบล็อกดัก Error ตรงนี้
+    if (error) {
+        console.error('เกิดข้อผิดพลาดในการโหลดตัวกรอง:', error);
+        alert('ไม่สามารถดึงข้อมูลตัวกรองได้ กรุณาตรวจสอบสิทธิ์ RLS ใน Supabase');
+        return;
+    }
     
     if (data) {
         const provinces = [...new Set(data.map(item => item.province_name))].sort();
