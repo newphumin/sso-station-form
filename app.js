@@ -6,10 +6,13 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
+// ==========================================
+// 2. ตัวแปรสถานะ (State Variables)
+// ==========================================
 let isSystemOpen = false;
 let stationsData = []; 
 let filterMapping = []; 
-let tambolMapping = new Map(); // เก็บความสัมพันธ์ อำเภอ -> ตำบล -> รหัสไปรษณีย์ (จาก Master Table)
+let tambolMapping = new Map(); 
 
 let currentUserProfile = { name: '', sso: '' };
 let pendingSaveData = null; 
@@ -17,10 +20,11 @@ let currentlyEditingCode = null;
 let pendingAdminAction = null; 
 
 // ==========================================
-// 2. Custom Alerts
+// 3. ฟังก์ชัน Custom Alerts
 // ==========================================
 function customAlert(title, message, type = 'info') {
     const modal = document.getElementById('customAlertModal');
+    if (!modal) return;
     const iconBox = document.getElementById('alertIconBox');
     const icon = document.getElementById('alertIcon');
     const titleEl = document.getElementById('alertTitle');
@@ -46,25 +50,31 @@ function customAlert(title, message, type = 'info') {
         icon.className = 'fa-solid fa-circle-info text-5xl text-blue-500';
         titleEl.className = 'text-xl font-bold text-blue-700 mb-2';
     }
-
     modal.classList.remove('hidden');
 }
 
 // ==========================================
-// 3. Admin Authentication
+// 4. ฟังก์ชัน Admin Authentication
 // ==========================================
 function requireAdminAuth(actionCallback) {
+    const pwdInput = document.getElementById('adminPasswordInput');
+    const modal = document.getElementById('adminAuthModal');
+    
+    if (!pwdInput || !modal) return;
+    
     pendingAdminAction = actionCallback;
-    document.getElementById('adminPasswordInput').value = '';
-    document.getElementById('adminAuthModal').classList.remove('hidden');
+    pwdInput.value = '';
+    modal.classList.remove('hidden');
+    pwdInput.focus();
 }
 
 function closeAdminAuth() {
-    document.getElementById('adminAuthModal').classList.add('hidden');
+    const modal = document.getElementById('adminAuthModal');
+    if(modal) modal.classList.add('hidden');
     pendingAdminAction = null;
 }
 
-document.getElementById('btnAdminVerify').addEventListener('click', async () => {
+async function verifyAdminPassword() {
     const pwd = document.getElementById('adminPasswordInput').value.trim();
     if (!pwd) { customAlert('แจ้งเตือน', 'กรุณากรอกรหัสผ่าน', 'warning'); return; }
 
@@ -86,10 +96,10 @@ document.getElementById('btnAdminVerify').addEventListener('click', async () => 
     } else {
         customAlert('ปฏิเสธการเข้าถึง', 'รหัสผ่านไม่ถูกต้อง', 'error');
     }
-});
+}
 
 // ==========================================
-// 4. ระบบ User Profile
+// 5. ฟังก์ชัน User Profile
 // ==========================================
 function loadUserProfile() {
     const savedName = localStorage.getItem('sso_user_name');
@@ -111,7 +121,7 @@ function updateProfileDisplay() {
     document.getElementById('profSSOInput').value = currentUserProfile.sso;
 }
 
-document.getElementById('btnSaveProfile').addEventListener('click', () => {
+function saveUserProfile() {
     const pName = document.getElementById('profNameInput').value.trim();
     const pSSO = document.getElementById('profSSOInput').value;
     if (!pName || !pSSO) { customAlert('ข้อมูลไม่ครบ', 'กรุณากรอกชื่อและเลือกสังกัดหน่วยงานให้ครบถ้วน', 'warning'); return; }
@@ -121,10 +131,10 @@ document.getElementById('btnSaveProfile').addEventListener('click', () => {
     currentUserProfile = { name: pName, sso: pSSO };
     updateProfileDisplay();
     document.getElementById('profileModal').classList.add('hidden');
-});
+}
 
 // ==========================================
-// 5. โหลด Master Data และ Filter
+// 6. โหลดข้อมูลเริ่มต้นและสถานะระบบ
 // ==========================================
 async function checkSystemStatus() {
     try {
@@ -132,6 +142,8 @@ async function checkSystemStatus() {
         isSystemOpen = data ? data.is_active : false;
         
         const badge = document.getElementById('systemStatusBadge');
+        if (!badge) return;
+
         if (isSystemOpen) {
             badge.innerHTML = '<i class="fa-solid fa-check-circle text-green-400"></i> ระบบเปิดรับข้อมูล';
             badge.className = 'px-3 py-1.5 rounded-full text-sm font-semibold bg-green-900/80 text-white border border-green-700 shadow-sm flex items-center gap-2';
@@ -140,7 +152,7 @@ async function checkSystemStatus() {
             badge.className = 'px-3 py-1.5 rounded-full text-sm font-semibold bg-red-900/80 text-white border border-red-700 shadow-sm flex items-center gap-2';
         }
         document.querySelectorAll('.btn-edit').forEach(btn => btn.disabled = !isSystemOpen);
-    } catch (err) {}
+    } catch (err) { console.error('Error checking system status:', err); }
 }
 
 async function toggleSystemStatus() {
@@ -156,16 +168,11 @@ async function toggleSystemStatus() {
     }
 }
 
-// โหลดตำบลจากตาราง Master Data ใหม่!
 async function loadTambolMaster() {
     let allTambols = []; let from = 0; const step = 1000; let hasMore = true;
     try {
         while (hasMore) {
-            // *** หากตารางของคุณชื่ออื่น ให้แก้ตรง 'ms_tambol' ครับ ***
-            const { data, error } = await supabaseClient.from('ms_tambol')
-                .select('amphur_code, tambol_code, tambol_name, post_code')
-                .range(from, from + step - 1);
-            
+            const { data, error } = await supabaseClient.from('ms_tambol').select('amphur_code, tambol_code, tambol_name, post_code').range(from, from + step - 1);
             if (error) throw error;
             if (data && data.length > 0) { allTambols = allTambols.concat(data); from += step; if (data.length < step) hasMore = false; } else hasMore = false;
         }
@@ -176,23 +183,17 @@ async function loadTambolMaster() {
                 const aCodeStr = String(i.amphur_code);
                 const tCodeStr = String(i.tambol_code);
                 if (!tambolMapping.has(aCodeStr)) tambolMapping.set(aCodeStr, new Map());
-                
-                // ใช้ post_code ตามโครงสร้างตารางใหม่
-                tambolMapping.get(aCodeStr).set(tCodeStr, { 
-                    name: i.tambol_name, 
-                    zip: i.post_code ? String(i.post_code) : '' 
-                });
+                tambolMapping.get(aCodeStr).set(tCodeStr, { name: i.tambol_name, zip: i.post_code ? String(i.post_code) : '' });
             }
         });
-        console.log("Loaded Tambol Master Data successfully.");
     } catch (err) {
         console.error("Error loading Tambol:", err);
-        customAlert('การเชื่อมต่อขัดข้อง', 'ไม่สามารถดึงข้อมูล Master Data ตำบลได้ โปรดตรวจสอบการตั้งค่า RLS ของตาราง ms_tambol', 'warning');
     }
 }
 
 async function loadFilterOptions() {
     const provSelect = document.getElementById('filterProvince');
+    if(!provSelect) return;
     provSelect.innerHTML = '<option value="">-- กำลังดึงข้อมูล... --</option>';
     provSelect.disabled = true;
 
@@ -211,15 +212,18 @@ async function loadFilterOptions() {
             const provMap = new Map();
             filterMapping.forEach(i => { if (i.province_code && !provMap.has(i.province_code)) provMap.set(i.province_code, `${i.province_code} - ${i.province_name}`); });
             populateDropdown('filterProvince', Array.from(provMap, ([value, text]) => ({value, text})), '-- แสดงทุกจังหวัด --');
-            document.getElementById('filterProvince').disabled = false;
+            provSelect.disabled = false;
 
             const ssoGlobalMap = new Map();
             filterMapping.forEach(i => { if (i.sso_branch_code && !ssoGlobalMap.has(i.sso_branch_code)) ssoGlobalMap.set(i.sso_branch_code, `${i.sso_branch_code} - ${i.sso_name}`); });
             const profileSSOs = [{value: '1000 - ส่วนกลาง', text: '1000 - ส่วนกลาง'}];
             Array.from(ssoGlobalMap).forEach(([v, t]) => profileSSOs.push({value: t, text: t}));
             populateDropdown('profSSOInput', profileSSOs, '-- เลือกหน่วยงานต้นสังกัด --');
-            if(currentUserProfile.sso) document.getElementById('profSSOInput').value = currentUserProfile.sso;
             
+            if(currentUserProfile.sso) {
+                const ssoInput = document.getElementById('profSSOInput');
+                if(ssoInput) ssoInput.value = currentUserProfile.sso;
+            }
         } else {
             provSelect.innerHTML = '<option value="">-- ไม่พบข้อมูลในระบบ --</option>';
         }
@@ -231,12 +235,15 @@ async function loadFilterOptions() {
 
 function populateDropdown(elementId, items, defaultText) {
     const sel = document.getElementById(elementId);
+    if(!sel) return;
     sel.innerHTML = `<option value="">${defaultText}</option>`;
     items.forEach(i => sel.innerHTML += `<option value="${i.value}">${i.text}</option>`);
 }
 
 function setupDropdownEvents() {
     const pSel = document.getElementById('filterProvince'); const sSel = document.getElementById('filterSSO'); const aSel = document.getElementById('filterAmphur');
+    if(!pSel || !sSel || !aSel) return;
+
     pSel.addEventListener('change', (e) => {
         sSel.innerHTML = '<option value="">-- แสดงทุกสำนักงาน --</option>'; sSel.disabled = true;
         aSel.innerHTML = '<option value="">-- แสดงทุกอำเภอ --</option>'; aSel.disabled = true;
@@ -262,11 +269,12 @@ function setupDropdownEvents() {
 }
 
 // ==========================================
-// 6. ฟังก์ชันค้นหา / ตารางข้อมูล
+// 7. ฟังก์ชันค้นหาและแสดงตาราง
 // ==========================================
 async function searchData() {
     currentlyEditingCode = null; 
     const tb = document.getElementById('dataTableBody');
+    if(!tb) return;
     tb.innerHTML = `<tr><td colspan="9" class="text-center py-10"><i class="fa-solid fa-spinner fa-spin text-2xl text-blue-500 mb-2"></i><br>กำลังค้นหาข้อมูล...</td></tr>`;
     
     const p = document.getElementById('filterProvince').value;
@@ -300,12 +308,10 @@ function renderTable(data) {
         const tr = document.createElement('tr');
         tr.className = 'hover:bg-slate-50 transition border-b border-slate-100 relative';
         
-        // สร้าง Dropdown ตำบลจาก Master Table
         const aCodeStr = String(row.amphur_code);
         let tambolOptionsHTML = `<option value="">-- เลือกตำบล --</option>`;
         if (tambolMapping.has(aCodeStr)) {
             const tMap = tambolMapping.get(aCodeStr);
-            // Sort ตำบลตามรหัสให้สวยงาม
             const sortedTambols = Array.from(tMap.entries()).sort((a, b) => a[0].localeCompare(b[0]));
             sortedTambols.forEach(([tCode, tData]) => {
                 const selected = (String(row.tambol_code) === tCode) ? 'selected' : '';
@@ -364,6 +370,9 @@ function updateZipCode(code, amphurCode) {
     } else zipInput.value = '';
 }
 
+// ==========================================
+// 8. ระบบล็อกสถานะ และแก้ไข
+// ==========================================
 function enableEdit(code) {
     if (!isSystemOpen) { customAlert('ไม่อนุญาต', 'ระบบปิดรับข้อมูลแล้ว ไม่สามารถแก้ไขได้', 'error'); return; }
     if (currentlyEditingCode !== null && currentlyEditingCode !== code) {
@@ -409,7 +418,7 @@ function cancelEdit(code, index) {
 }
 
 // ==========================================
-// 7. Confirmation Modal & Save
+// 9. ระบบตรวจสอบ และ บันทึกข้อมูล
 // ==========================================
 function prepareSaveData(code, index) {
     if (!isSystemOpen) return;
@@ -454,14 +463,22 @@ function prepareSaveData(code, index) {
 
 function setConfirmRow(field, oldVal, newVal) {
     const oldEl = document.getElementById(`confOld${field}`); const newEl = document.getElementById(`confNew${field}`);
+    if(!oldEl || !newEl) return;
     oldEl.innerText = oldVal || '-'; newEl.innerText = newVal || '-';
     if (oldVal !== newVal) { oldEl.classList.add('line-through', 'text-slate-400'); newEl.classList.add('highlight-change'); } 
     else { oldEl.classList.remove('line-through', 'text-slate-400'); newEl.classList.remove('highlight-change'); }
 }
 
-function closeConfirmModal() { document.getElementById('confirmSaveModal').classList.add('hidden'); pendingSaveData = null; }
+function closeConfirmModal() { 
+    const m = document.getElementById('confirmSaveModal');
+    if(m) m.classList.add('hidden'); 
+    pendingSaveData = null; 
+}
 
-document.getElementById('btnConfirmExecute').addEventListener('click', async () => {
+function escapeSQL(val) { return !val ? '' : val.replace(/'/g, "''"); }
+
+// *** นี่คือฟังก์ชันสำคัญที่หายไป ถูกนำกลับมาแล้วครับ ***
+async function executeSaveData() {
     if (!pendingSaveData) return;
     const { code, index, oldData, newName, newLoc, newAddr, newTamCode, newTamName, newZip, newUrl } = pendingSaveData;
     const btnEx = document.getElementById('btnConfirmExecute');
@@ -508,12 +525,10 @@ document.getElementById('btnConfirmExecute').addEventListener('click', async () 
     btnEx.disabled = false; btnEx.innerHTML = '<i class="fa-solid fa-save"></i> ยืนยันการบันทึก';
     closeConfirmModal();
     customAlert('บันทึกสำเร็จ', 'อัปเดตข้อมูลสถานที่เลือกตั้งเรียบร้อยแล้ว', 'success');
-});
-
-function escapeSQL(val) { return !val ? '' : val.replace(/'/g, "''"); }
+}
 
 // ==========================================
-// 8. ประวัติ (History) และ Export
+// 10. ประวัติ และ Export Script
 // ==========================================
 async function openHistoryModal() {
     document.getElementById('historyModal').classList.remove('hidden');
@@ -541,6 +556,7 @@ function openExportModalFlow() {
     requireAdminAuth(async () => {
         document.getElementById('exportModal').classList.remove('hidden');
         const txt = document.getElementById('sqlOutputArea');
+        if(!txt) return;
         txt.value = '-- กำลังดึงข้อมูลและประมวลผล Script...';
 
         const { data, error } = await supabaseClient.from('station_update_logs').select('sql_script, updated_at, polling_station_code, updated_by').order('updated_at', { ascending: true });
@@ -560,44 +576,76 @@ function openExportModalFlow() {
     });
 }
 
-document.getElementById('btnDownloadSQL').addEventListener('click', () => {
-    const content = document.getElementById('sqlOutputArea').value;
-    if (content.includes('-- ไม่มี') || content.includes('-- กำลัง')) return;
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([content], { type: 'text/sql' }));
-    a.download = `sso_update_script_${new Date().toISOString().slice(0,10)}.sql`;
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-});
-
 // ==========================================
-// 9. Initial Events
+// 11. ผูกปุ่ม Event Listener ทั้งหมด
 // ==========================================
 window.addEventListener('DOMContentLoaded', () => {
+    
+    // โหลดข้อมูลเบื้องต้นเมื่อเปิดเว็บ
     loadUserProfile();
     checkSystemStatus();
     loadFilterOptions();
-    loadTambolMaster(); // โหลดตำบลรอไว้เลยตั้งแต่แรก
+    loadTambolMaster();
     setupDropdownEvents();
 
-    document.getElementById('btnSearch').addEventListener('click', searchData);
-    document.getElementById('searchInput').addEventListener('keypress', (e) => { if(e.key === 'Enter') searchData(); });
+    // 1. ปุ่มบันทึกโปรไฟล์
+    const btnSaveProfile = document.getElementById('btnSaveProfile');
+    if(btnSaveProfile) btnSaveProfile.addEventListener('click', saveUserProfile);
 
-    document.getElementById('btnClear').addEventListener('click', () => {
-        document.getElementById('filterProvince').value = '';
-        document.getElementById('filterSSO').innerHTML = '<option value="">-- แสดงทุกสำนักงาน --</option>'; document.getElementById('filterSSO').disabled = true;
-        document.getElementById('filterAmphur').innerHTML = '<option value="">-- แสดงทุกอำเภอ --</option>'; document.getElementById('filterAmphur').disabled = true;
-        document.getElementById('searchInput').value = '';
-        document.getElementById('dataTableBody').innerHTML = `<tr><td colspan="9" class="text-center py-20 text-slate-400">กรุณาเลือกเงื่อนไขและกดค้นหา</td></tr>`;
-        document.getElementById('recordCount').innerText = 'พบข้อมูล 0 รายการ';
-        currentlyEditingCode = null; 
-    });
+    // 2. ยืนยันรหัสผ่าน Admin
+    const btnAdminVerify = document.getElementById('btnAdminVerify');
+    if(btnAdminVerify) btnAdminVerify.addEventListener('click', verifyAdminPassword);
 
+    // 3. ปุ่มค้นหา และ กด Enter
+    const btnSearch = document.getElementById('btnSearch');
+    if(btnSearch) btnSearch.addEventListener('click', searchData);
+    
+    const searchInput = document.getElementById('searchInput');
+    if(searchInput) searchInput.addEventListener('keypress', (e) => { if(e.key === 'Enter') searchData(); });
+
+    // 4. ปุ่มล้างค่าค้นหา
+    const btnClear = document.getElementById('btnClear');
+    if(btnClear) {
+        btnClear.addEventListener('click', () => {
+            document.getElementById('filterProvince').value = '';
+            document.getElementById('filterSSO').innerHTML = '<option value="">-- แสดงทุกสำนักงาน --</option>'; document.getElementById('filterSSO').disabled = true;
+            document.getElementById('filterAmphur').innerHTML = '<option value="">-- แสดงทุกอำเภอ --</option>'; document.getElementById('filterAmphur').disabled = true;
+            document.getElementById('searchInput').value = '';
+            document.getElementById('dataTableBody').innerHTML = `<tr><td colspan="9" class="text-center py-20 text-slate-400">กรุณาเลือกเงื่อนไขและกดค้นหา</td></tr>`;
+            document.getElementById('recordCount').innerText = 'พบข้อมูล 0 รายการ';
+            currentlyEditingCode = null; 
+        });
+    }
+
+    // 5. ปุ่ม Admin (เปิด/ปิดระบบ)
     const toggleBtn = document.getElementById('btnToggleSystem');
     if(toggleBtn) { 
         toggleBtn.classList.remove('hidden'); 
         toggleBtn.addEventListener('click', () => requireAdminAuth(toggleSystemStatus)); 
     }
     
-    document.getElementById('btnHistory').addEventListener('click', openHistoryModal);
-    document.getElementById('btnExport').addEventListener('click', openExportModalFlow);
+    // 6. ปุ่มดูประวัติ
+    const btnHistory = document.getElementById('btnHistory');
+    if(btnHistory) btnHistory.addEventListener('click', openHistoryModal);
+    
+    // 7. ปุ่มเปิดหน้าต่าง Export Script
+    const btnExport = document.getElementById('btnExport');
+    if(btnExport) btnExport.addEventListener('click', openExportModalFlow);
+
+    // 8. ปุ่มดาวน์โหลดไฟล์ .sql ในหน้าต่าง Export
+    const btnDownloadSQL = document.getElementById('btnDownloadSQL');
+    if(btnDownloadSQL) {
+        btnDownloadSQL.addEventListener('click', () => {
+            const content = document.getElementById('sqlOutputArea').value;
+            if (content.includes('-- ไม่มี') || content.includes('-- กำลัง')) return;
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(new Blob([content], { type: 'text/sql' }));
+            a.download = `sso_update_script_${new Date().toISOString().slice(0,10)}.sql`;
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        });
+    }
+    
+    // 9. *** ปุ่มยืนยันการบันทึกข้อมูลเข้าฐานข้อมูล (ที่เคยหายไป) ***
+    const btnConfirmExecute = document.getElementById('btnConfirmExecute');
+    if(btnConfirmExecute) btnConfirmExecute.addEventListener('click', executeSaveData);
 });
