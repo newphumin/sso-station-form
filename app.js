@@ -3,7 +3,7 @@
 // ==========================================
 // นำ URL และ KEY จากเมนู Project Settings -> API มาใส่ที่นี่
 const SUPABASE_URL = 'https://fkgpxagdgdubdwtdxtry.supabase.co'; 
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZrZ3B4YWdkZ2R1YmR3dGR4dHJ5Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4OTQ1MTkwMiwiZXhwIjoyMTA1MDI3OTAyfQ.9cA0kiuDf6ZtEjqVRp2OqZiHxf0ad1LFhRWcQ90_zrM';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZrZ3B4YWdkZ2R1YmR3dGR4dHJ5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk0NTE5MDIsImV4cCI6MjEwNTAyNzkwMn0.IosqraENXtMvgrzOdiIK01bRqxe_H8HdBNwtUt7O_e8';
 
 const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
