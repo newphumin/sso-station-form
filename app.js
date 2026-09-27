@@ -62,7 +62,7 @@ function requireAdminAuth(actionCallback) {
     
     if (!pwdInput || !modal) return;
     
-    pendingAdminAction = actionCallback;
+    pendingAdminAction = actionCallback; // เก็บฟังก์ชันที่ต้องทำเอาไว้
     pwdInput.value = '';
     modal.classList.remove('hidden');
     pwdInput.focus();
@@ -71,11 +71,12 @@ function requireAdminAuth(actionCallback) {
 function closeAdminAuth() {
     const modal = document.getElementById('adminAuthModal');
     if(modal) modal.classList.add('hidden');
-    pendingAdminAction = null;
+    pendingAdminAction = null; // เมื่อสั่งปิด จะล้างค่าที่ค้างอยู่
 }
 
 async function verifyAdminPassword() {
-    const pwd = document.getElementById('adminPasswordInput').value.trim();
+    const pwdInput = document.getElementById('adminPasswordInput');
+    const pwd = pwdInput.value.trim();
     if (!pwd) { customAlert('แจ้งเตือน', 'กรุณากรอกรหัสผ่าน', 'warning'); return; }
 
     const btn = document.getElementById('btnAdminVerify');
@@ -91,10 +92,14 @@ async function verifyAdminPassword() {
     }
 
     if (data.setting_value === pwd) {
-        closeAdminAuth();
-        if (pendingAdminAction) pendingAdminAction(); 
+        // [จุดที่แก้ไขบั๊ก] ต้องสำเนาคำสั่งออกมาก่อนสั่งปิด Modal
+        const actionToExecute = pendingAdminAction; 
+        closeAdminAuth(); // คำสั่งนี้จะเคลียร์ pendingAdminAction ทิ้ง
+        if (actionToExecute) actionToExecute(); // รันคำสั่งที่สำเนาไว้
     } else {
         customAlert('ปฏิเสธการเข้าถึง', 'รหัสผ่านไม่ถูกต้อง', 'error');
+        pwdInput.value = '';
+        pwdInput.focus();
     }
 }
 
@@ -157,14 +162,24 @@ async function checkSystemStatus() {
 
 async function toggleSystemStatus() {
     const newStatus = !isSystemOpen;
-    if(confirm(newStatus ? 'คุณต้องการ "เปิด" ระบบรับข้อมูลใช่หรือไม่?' : 'คุณต้องการ "ปิด" ระบบรับข้อมูลใช่หรือไม่?')) {
+    if(confirm(newStatus ? 'ยืนยันการตั้งค่า: คุณต้องการ "เปิด" ระบบรับข้อมูลใช่หรือไม่?' : 'ยืนยันการตั้งค่า: คุณต้องการ "ปิด" ระบบรับข้อมูลใช่หรือไม่?')) {
         const { data: existing } = await supabaseClient.from('system_settings_1').select('setting_name').eq('setting_name', 'is_form_open').maybeSingle();
         let error;
         if (existing) error = (await supabaseClient.from('system_settings_1').update({ is_active: newStatus }).eq('setting_name', 'is_form_open')).error;
         else error = (await supabaseClient.from('system_settings_1').insert([{ setting_name: 'is_form_open', is_active: newStatus }])).error;
             
-        if(error) customAlert('เกิดข้อผิดพลาด', 'ไม่สามารถเปลี่ยนสถานะระบบได้: ' + error.message, 'error');
-        else { customAlert('สำเร็จ', 'เปลี่ยนสถานะระบบเรียบร้อยแล้ว', 'success'); checkSystemStatus(); }
+        if(error) {
+            customAlert('เกิดข้อผิดพลาด', 'ไม่สามารถเปลี่ยนสถานะระบบได้: ' + error.message, 'error');
+        } else { 
+            customAlert('สำเร็จ', `เปลี่ยนสถานะเป็น ${newStatus ? 'เปิด' : 'ปิด'}ระบบ เรียบร้อยแล้ว`, 'success'); 
+            checkSystemStatus(); 
+
+            // หากแอดมินปิดระบบ ให้บังคับล็อกบรรทัดที่พนักงานเปิดแก้ไขค้างไว้อยู่ทันที
+            if (!newStatus && currentlyEditingCode !== null) {
+                const idx = stationsData.findIndex(row => row.polling_station_code == currentlyEditingCode);
+                if (idx !== -1) cancelEdit(currentlyEditingCode, idx);
+            }
+        }
     }
 }
 
@@ -477,7 +492,6 @@ function closeConfirmModal() {
 
 function escapeSQL(val) { return !val ? '' : val.replace(/'/g, "''"); }
 
-// *** นี่คือฟังก์ชันสำคัญที่หายไป ถูกนำกลับมาแล้วครับ ***
 async function executeSaveData() {
     if (!pendingSaveData) return;
     const { code, index, oldData, newName, newLoc, newAddr, newTamCode, newTamName, newZip, newUrl } = pendingSaveData;
@@ -581,7 +595,7 @@ function openExportModalFlow() {
 // ==========================================
 window.addEventListener('DOMContentLoaded', () => {
     
-    // โหลดข้อมูลเบื้องต้นเมื่อเปิดเว็บ
+    // โหลดข้อมูลเบื้องต้น
     loadUserProfile();
     checkSystemStatus();
     loadFilterOptions();
@@ -595,8 +609,16 @@ window.addEventListener('DOMContentLoaded', () => {
     // 2. ยืนยันรหัสผ่าน Admin
     const btnAdminVerify = document.getElementById('btnAdminVerify');
     if(btnAdminVerify) btnAdminVerify.addEventListener('click', verifyAdminPassword);
+    
+    // 2.1 เพิ่มฟีเจอร์กด Enter ในช่องรหัสผ่าน Admin
+    const adminPwdInput = document.getElementById('adminPasswordInput');
+    if(adminPwdInput) {
+        adminPwdInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') verifyAdminPassword();
+        });
+    }
 
-    // 3. ปุ่มค้นหา และ กด Enter
+    // 3. ปุ่มค้นหา
     const btnSearch = document.getElementById('btnSearch');
     if(btnSearch) btnSearch.addEventListener('click', searchData);
     
@@ -628,11 +650,11 @@ window.addEventListener('DOMContentLoaded', () => {
     const btnHistory = document.getElementById('btnHistory');
     if(btnHistory) btnHistory.addEventListener('click', openHistoryModal);
     
-    // 7. ปุ่มเปิดหน้าต่าง Export Script
+    // 7. ปุ่ม Export Script
     const btnExport = document.getElementById('btnExport');
     if(btnExport) btnExport.addEventListener('click', openExportModalFlow);
 
-    // 8. ปุ่มดาวน์โหลดไฟล์ .sql ในหน้าต่าง Export
+    // 8. ปุ่มดาวน์โหลดไฟล์ .sql
     const btnDownloadSQL = document.getElementById('btnDownloadSQL');
     if(btnDownloadSQL) {
         btnDownloadSQL.addEventListener('click', () => {
@@ -645,7 +667,7 @@ window.addEventListener('DOMContentLoaded', () => {
         });
     }
     
-    // 9. *** ปุ่มยืนยันการบันทึกข้อมูลเข้าฐานข้อมูล (ที่เคยหายไป) ***
+    // 9. ปุ่มยืนยันการบันทึก
     const btnConfirmExecute = document.getElementById('btnConfirmExecute');
     if(btnConfirmExecute) btnConfirmExecute.addEventListener('click', executeSaveData);
 });
