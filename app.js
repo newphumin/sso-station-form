@@ -18,13 +18,79 @@ let pendingSaveData = null;
 let currentlyEditingCode = null; 
 let pendingAdminAction = null; 
 
-// ตัวแปรสำหรับแบ่งหน้า (Pagination)
 let currentSearchData = []; 
 let currentPage = 1;
 const itemsPerPage = 100;
 
 // ==========================================
-// 3. ฟังก์ชัน Custom Alerts & Confirm
+// 3. ฟังก์ชันสิทธิ์ผู้ใช้งาน (Role-Based Access)
+// ==========================================
+function getRoleAccess() {
+    if (!currentUserProfile.sso) return { type: 'NONE', prov: null, sso: null };
+    const ssoCode = currentUserProfile.sso.split(' - ')[0]; 
+    
+    if (ssoCode === '1000') return { type: 'ADMIN', prov: null, sso: null };
+    
+    const ssoNum = parseInt(ssoCode, 10);
+    // กทม. รหัส 1001 - 1012 (ล็อกเขต)
+    if (ssoNum >= 1001 && ssoNum <= 1012) {
+        return { type: 'BKK_BRANCH', prov: '10', sso: ssoCode };
+    }
+    
+    // ต่างจังหวัด (ล็อกจังหวัด) อ่านรหัสจังหวัดจาก 2 ตัวแรก
+    const provCode = ssoCode.substring(0, 2);
+    return { type: 'PROVINCE', prov: provCode, sso: null };
+}
+
+function applyRoleBasedFilters(prefix = 'filter') {
+    const access = getRoleAccess();
+    const pSel = document.getElementById(`${prefix}Province`);
+    const sSel = document.getElementById(`${prefix}SSO`);
+    const aSel = document.getElementById(`${prefix}Amphur`);
+    
+    if (!pSel || filterMapping.length === 0) return;
+
+    pSel.disabled = false; sSel.disabled = true; aSel.disabled = true;
+    
+    if (access.type === 'ADMIN') {
+        pSel.value = '';
+        sSel.innerHTML = '<option value="">-- แสดงทุกสำนักงาน --</option>';
+        aSel.innerHTML = '<option value="">-- แสดงทุกอำเภอ --</option>';
+    } 
+    else if (access.type === 'BKK_BRANCH') {
+        pSel.value = access.prov; pSel.disabled = true; 
+        
+        const sMap = new Map();
+        filterMapping.filter(i => i.province_code == access.prov).forEach(i => {
+            if (i.sso_branch_code && !sMap.has(i.sso_branch_code)) sMap.set(i.sso_branch_code, `${i.sso_branch_code} - ${i.sso_name}`);
+        });
+        populateDropdown(`${prefix}SSO`, Array.from(sMap, ([value, text]) => ({value, text})), '-- แสดงทุกสำนักงาน --');
+        sSel.value = access.sso; sSel.disabled = true; 
+        
+        const aMap = new Map();
+        filterMapping.filter(i => i.province_code == access.prov && i.sso_branch_code == access.sso).forEach(i => {
+            if (i.amphur_code && !aMap.has(i.amphur_code)) aMap.set(i.amphur_code, `${i.amphur_code} - ${i.amphur_name}`);
+        });
+        populateDropdown(`${prefix}Amphur`, Array.from(aMap, ([value, text]) => ({value, text})), '-- แสดงทุกอำเภอ --');
+        aSel.disabled = false; 
+    }
+    else if (access.type === 'PROVINCE') {
+        pSel.value = access.prov; pSel.disabled = true; 
+        
+        const sMap = new Map();
+        filterMapping.filter(i => i.province_code == access.prov).forEach(i => {
+            if (i.sso_branch_code && !sMap.has(i.sso_branch_code)) sMap.set(i.sso_branch_code, `${i.sso_branch_code} - ${i.sso_name}`);
+        });
+        populateDropdown(`${prefix}SSO`, Array.from(sMap, ([value, text]) => ({value, text})), '-- แสดงทุกสำนักงาน --');
+        sSel.disabled = false; 
+        
+        sSel.value = '';
+        aSel.innerHTML = '<option value="">-- แสดงทุกอำเภอ --</option>';
+    }
+}
+
+// ==========================================
+// 4. ฟังก์ชัน Custom Alerts & Confirm
 // ==========================================
 function customAlert(title, message, type = 'info') {
     const modal = document.getElementById('customAlertModal');
@@ -63,7 +129,7 @@ function customConfirm(title, message, callbackOk) {
 }
 
 // ==========================================
-// 4. Admin Auth
+// 5. Admin Auth
 // ==========================================
 function requireAdminAuth(actionCallback) {
     const pwdInput = document.getElementById('adminPasswordInput');
@@ -102,7 +168,7 @@ async function verifyAdminPassword() {
 }
 
 // ==========================================
-// 5. User Profile
+// 6. User Profile
 // ==========================================
 function loadUserProfile() {
     const savedName = localStorage.getItem('sso_user_name'); const savedSSO = localStorage.getItem('sso_user_sso');
@@ -122,13 +188,18 @@ function updateProfileDisplay() {
 function saveUserProfile() {
     const pName = document.getElementById('profNameInput').value.trim(); const pSSO = document.getElementById('profSSOInput').value;
     if (!pName || !pSSO) { customAlert('ข้อมูลไม่ครบ', 'กรุณากรอกชื่อและเลือกสังกัดหน่วยงานให้ครบถ้วน', 'warning'); return; }
+    
     localStorage.setItem('sso_user_name', pName); localStorage.setItem('sso_user_sso', pSSO);
     currentUserProfile = { name: pName, sso: pSSO };
-    updateProfileDisplay(); document.getElementById('profileModal').classList.add('hidden');
+    updateProfileDisplay(); 
+    document.getElementById('profileModal').classList.add('hidden');
+    
+    applyRoleBasedFilters('filter');
+    document.getElementById('btnClear').click(); 
 }
 
 // ==========================================
-// 6. โหลดข้อมูลเริ่มต้น และ Filter
+// 7. โหลดข้อมูลเริ่มต้น และ Filter
 // ==========================================
 async function checkSystemStatus() {
     try {
@@ -209,7 +280,6 @@ async function loadFilterOptions() {
             const provMap = new Map();
             filterMapping.forEach(i => { if (i.province_code && !provMap.has(i.province_code)) provMap.set(i.province_code, `${i.province_code} - ${i.province_name}`); });
             populateDropdown('filterProvince', Array.from(provMap, ([value, text]) => ({value, text})), '-- แสดงทุกจังหวัด --');
-            provSelect.disabled = false;
 
             const ssoGlobalMap = new Map();
             filterMapping.forEach(i => { if (i.sso_branch_code && !ssoGlobalMap.has(i.sso_branch_code)) ssoGlobalMap.set(i.sso_branch_code, `${i.sso_branch_code} - ${i.sso_name}`); });
@@ -217,7 +287,12 @@ async function loadFilterOptions() {
             Array.from(ssoGlobalMap).forEach(([v, t]) => profileSSOs.push({value: t, text: t}));
             populateDropdown('profSSOInput', profileSSOs, '-- เลือกหน่วยงานต้นสังกัด --');
             
-            if(currentUserProfile.sso) { const ssoInput = document.getElementById('profSSOInput'); if(ssoInput) ssoInput.value = currentUserProfile.sso; }
+            if(currentUserProfile.sso) { 
+                const ssoInput = document.getElementById('profSSOInput'); if(ssoInput) ssoInput.value = currentUserProfile.sso; 
+                applyRoleBasedFilters('filter');
+            } else {
+                provSelect.disabled = false;
+            }
         } else provSelect.innerHTML = '<option value="">-- ไม่พบข้อมูลในระบบ --</option>';
     } catch (err) {
         provSelect.innerHTML = '<option value="">-- โหลดข้อมูลล้มเหลว --</option>';
@@ -261,7 +336,7 @@ function setupDropdownEvents() {
 }
 
 // ==========================================
-// 7. ฟังก์ชันค้นหา, แบ่งหน้า (Pagination) และตาราง
+// 8. ฟังก์ชันค้นหา, แบ่งหน้า (Pagination) และตาราง
 // ==========================================
 async function searchData() {
     currentlyEditingCode = null; 
@@ -277,13 +352,17 @@ async function searchData() {
     const txt = document.getElementById('searchInput').value.trim();
 
     let allFetchedData = [];
-    let fetchFrom = 0; 
-    const fetchStep = 1000; 
-    let hasMoreData = true;
+    let fetchFrom = 0; const fetchStep = 1000; let hasMoreData = true;
+    const access = getRoleAccess(); 
 
     try {
         while (hasMoreData) {
             let query = supabaseClient.from('ms_station_1').select('*');
+            
+            // [Security] บังคับคัดกรองข้อมูลตามสิทธิ์ระดับฐานข้อมูลเสมอ
+            if (access.type === 'BKK_BRANCH') query = query.eq('sso_branch_code', access.sso);
+            else if (access.type === 'PROVINCE') query = query.eq('province_code', access.prov);
+
             if (p) query = query.eq('province_code', p);
             if (s) query = query.eq('sso_branch_code', s);
             if (a) query = query.eq('amphur_code', a);
@@ -296,22 +375,17 @@ async function searchData() {
             
             if (error) throw error;
             if (data && data.length > 0) { 
-                allFetchedData = allFetchedData.concat(data); 
-                fetchFrom += fetchStep; 
+                allFetchedData = allFetchedData.concat(data); fetchFrom += fetchStep; 
                 if (data.length < fetchStep) hasMoreData = false; 
-            } else {
-                hasMoreData = false;
-            }
+            } else { hasMoreData = false; }
         }
     } catch (err) {
-        tb.innerHTML = `<tr><td colspan="9" class="text-center py-10 text-red-500">Error: ${err.message}</td></tr>`; 
-        return;
+        tb.innerHTML = `<tr><td colspan="9" class="text-center py-10 text-red-500">Error: ${err.message}</td></tr>`; return;
     }
 
     currentSearchData = allFetchedData;
     currentPage = 1;
     document.getElementById('recordCount').innerText = `พบข้อมูล ${currentSearchData.length} รายการ`;
-    
     renderCurrentPage();
 }
 
@@ -345,21 +419,16 @@ function renderPagination() {
     const totalPages = Math.ceil(currentSearchData.length / itemsPerPage);
     
     if (currentSearchData.length === 0) {
-        containerTop.classList.add('hidden');
-        containerBottom.classList.add('hidden');
-        return;
+        containerTop.classList.add('hidden'); containerBottom.classList.add('hidden'); return;
     }
 
-    containerTop.classList.remove('hidden');
-    containerBottom.classList.remove('hidden');
+    containerTop.classList.remove('hidden'); containerBottom.classList.remove('hidden');
 
     const startItem = ((currentPage - 1) * itemsPerPage) + 1;
     const endItem = Math.min(currentPage * itemsPerPage, currentSearchData.length);
     
     let html = `<div class="text-sm text-slate-500 mb-3 md:mb-0">แสดงผล <span class="font-bold">${startItem} - ${endItem}</span> จาก <span class="font-bold">${currentSearchData.length}</span> รายการ</div>`;
-    
     html += `<div class="flex items-center gap-1">`;
-    
     html += `<button onclick="goToPage(${currentPage - 1})" class="px-3 py-1.5 border border-slate-300 rounded text-sm hover:bg-slate-100 text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed transition" ${currentPage === 1 ? 'disabled' : ''}><i class="fa-solid fa-chevron-left mr-1"></i> ก่อนหน้า</button>`;
     
     let startPage = Math.max(1, currentPage - 2);
@@ -371,9 +440,7 @@ function renderPagination() {
     }
 
     for (let i = startPage; i <= endPage; i++) {
-        const activeClass = i === currentPage 
-            ? 'bg-[#1e3a8a] text-white border-[#1e3a8a] font-bold shadow-sm' 
-            : 'border-slate-300 hover:bg-slate-100 text-slate-600';
+        const activeClass = i === currentPage ? 'bg-[#1e3a8a] text-white border-[#1e3a8a] font-bold shadow-sm' : 'border-slate-300 hover:bg-slate-100 text-slate-600';
         html += `<button onclick="goToPage(${i})" class="px-3 py-1.5 border rounded text-sm transition ${activeClass}">${i}</button>`;
     }
 
@@ -385,8 +452,7 @@ function renderPagination() {
     html += `<button onclick="goToPage(${currentPage + 1})" class="px-3 py-1.5 border border-slate-300 rounded text-sm hover:bg-slate-100 text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed transition" ${currentPage === totalPages ? 'disabled' : ''}>ถัดไป <i class="fa-solid fa-chevron-right ml-1"></i></button>`;
     html += `</div>`;
 
-    containerTop.innerHTML = html;
-    containerBottom.innerHTML = html;
+    containerTop.innerHTML = html; containerBottom.innerHTML = html;
 }
 
 function renderTable(data, startIndex) {
@@ -442,7 +508,7 @@ function updateZipCode(code, amphurCode) {
 }
 
 // ==========================================
-// 8. ระบบล็อกสถานะ และแก้ไข
+// 9. ระบบล็อกสถานะ และแก้ไข
 // ==========================================
 function enableEdit(code) {
     if (!isSystemOpen) { customAlert('ไม่อนุญาต', 'ระบบปิดรับข้อมูลแล้ว ไม่สามารถแก้ไขได้', 'error'); return; }
@@ -477,7 +543,7 @@ function cancelEdit(code, absoluteIndex) {
 }
 
 // ==========================================
-// 9. ระบบตรวจสอบ และ บันทึกข้อมูล
+// 10. ระบบตรวจสอบ และ บันทึกข้อมูล
 // ==========================================
 function prepareSaveData(code, absoluteIndex) {
     if (!isSystemOpen) return;
@@ -567,7 +633,7 @@ async function executeSaveData() {
 }
 
 // ==========================================
-// 10. ระบบ Export Excel 
+// 11. ระบบ Export Excel 
 // ==========================================
 function openExcelModalFlow() {
     const pSel = document.getElementById('excelFilterProvince');
@@ -577,6 +643,8 @@ function openExcelModalFlow() {
         populateDropdown('excelFilterProvince', Array.from(provMap, ([value, text]) => ({value, text})), '-- ทุกจังหวัด --');
     }
     
+    applyRoleBasedFilters('excelFilter');
+
     const exPSel = document.getElementById('excelFilterProvince'); const exSSel = document.getElementById('excelFilterSSO'); const exASel = document.getElementById('excelFilterAmphur');
     if(exPSel && !exPSel.hasAttribute('data-event-bound')) {
         exPSel.addEventListener('change', (e) => {
@@ -612,6 +680,7 @@ async function executeExcelExport() {
         const p = document.getElementById('excelFilterProvince').value;
         const s = document.getElementById('excelFilterSSO').value;
         const a = document.getElementById('excelFilterAmphur').value;
+        const access = getRoleAccess();
 
         let allLogs = [];
         let logFrom = 0; const logStep = 1000; let logHasMore = true;
@@ -635,6 +704,10 @@ async function executeExcelExport() {
         let stFrom = 0; const stStep = 1000; let stHasMore = true;
         while (stHasMore) {
             let q = supabaseClient.from('ms_station_1').select('polling_station_code, province_code, province_name, amphur_code, amphur_name, sso_branch_code, sso_name').range(stFrom, stFrom + stStep - 1);
+            
+            if (access.type === 'BKK_BRANCH') q = q.eq('sso_branch_code', access.sso);
+            else if (access.type === 'PROVINCE') q = q.eq('province_code', access.prov);
+
             if (p) q = q.eq('province_code', p);
             if (s) q = q.eq('sso_branch_code', s);
             if (a) q = q.eq('amphur_code', a);
@@ -718,7 +791,7 @@ async function executeExcelExport() {
 }
 
 // ==========================================
-// 11. ประวัติ และ Export Script (SQL) (อัปเดตแก้บั๊ก 1000 แถว)
+// 12. ประวัติ และ Export Script (SQL) 
 // ==========================================
 async function openHistoryModal() {
     document.getElementById('historyModal').classList.remove('hidden');
@@ -726,17 +799,32 @@ async function openHistoryModal() {
     tb.innerHTML = `<tr><td colspan="4" class="text-center py-4">กำลังโหลด...</td></tr>`;
 
     const p = document.getElementById('filterProvince').value;
-    let provNameText = p ? `เฉพาะจังหวัดที่เลือก` : `ทั่วประเทศ`;
+    const access = getRoleAccess();
+    
+    let provNameText = `ทั่วประเทศ`;
+    if (access.type === 'BKK_BRANCH') provNameText = `กทม. รหัส ${access.sso}`;
+    else if (access.type === 'PROVINCE') provNameText = `รหัสจังหวัด ${access.prov}`;
+    else if (p) provNameText = `เฉพาะจังหวัดที่เลือก`;
 
     const { data, error } = await supabaseClient.from('station_update_logs').select('*').order('updated_at', { ascending: false }).limit(2000);
     if (error || !data) { tb.innerHTML = `<tr><td colspan="4" class="text-center py-4 text-red-500">โหลดประวัติล้มเหลว</td></tr>`; return; }
 
     let filteredLogs = data;
-    if (p) {
-        const codeToProv = new Map();
-        filterMapping.forEach(item => codeToProv.set(String(item.polling_station_code), String(item.province_code)));
-        filteredLogs = data.filter(log => codeToProv.get(String(log.polling_station_code)) === p);
+    
+    const codeToProv = new Map();
+    const codeToSSO = new Map();
+    filterMapping.forEach(item => {
+        codeToProv.set(String(item.polling_station_code), String(item.province_code));
+        codeToSSO.set(String(item.polling_station_code), String(item.sso_branch_code));
+    });
+
+    if (access.type === 'BKK_BRANCH') {
+        filteredLogs = filteredLogs.filter(log => codeToSSO.get(String(log.polling_station_code)) === access.sso);
+    } else if (access.type === 'PROVINCE') {
+        filteredLogs = filteredLogs.filter(log => codeToProv.get(String(log.polling_station_code)) === access.prov);
     }
+
+    if (p) filteredLogs = filteredLogs.filter(log => codeToProv.get(String(log.polling_station_code)) === p);
 
     filteredLogs = filteredLogs.slice(0, 50);
     tb.innerHTML = '';
@@ -772,7 +860,7 @@ async function openHistoryModal() {
     });
 }
 
-// [อัปเดต] ใช้ระบบ Loop ดึงข้อมูลทะลุ 1000 แถว เพื่อป้องกัน Script ขาดหาย
+// [Security Fix] อัปเดตฟังก์ชัน Export SQL Script ให้มีระบบจำกัดสิทธิ์ (RBAC) และการดึงข้อมูลทะลุ Limit
 function openExportModalFlow() {
     requireAdminAuth(async () => {
         document.getElementById('exportModal').classList.remove('hidden');
@@ -781,10 +869,11 @@ function openExportModalFlow() {
         txt.value = '-- กำลังดึงข้อมูลและประมวลผล Script...';
 
         try {
+            const access = getRoleAccess();
             let allLogs = [];
             let logFrom = 0; const logStep = 1000; let logHasMore = true;
             
-            // Loop ดึงประวัติทั้งหมด
+            // Loop ดึงประวัติทั้งหมดเพื่อป้องกันการตัดจบที่ 1000 แถว
             while(logHasMore) {
                 const { data: logs, error: errLog } = await supabaseClient.from('station_update_logs')
                     .select('sql_script, updated_at, polling_station_code, updated_by').order('updated_at', { ascending: true }).range(logFrom, logFrom + logStep - 1);
@@ -801,13 +890,32 @@ function openExportModalFlow() {
 
             if (allLogs.length === 0) { txt.value = '-- ไม่มีประวัติการอัปเดตข้อมูลในระบบ'; return; }
 
-            // กรองข้อมูลซ้ำ (Deduplicate)
+            // [Security] คัดกรอง Log ให้ตรงตามสิทธิ์ของผู้ใช้งาน (Data Isolation)
+            let filteredLogs = allLogs;
+            if (access.type !== 'ADMIN') {
+                const codeToProv = new Map();
+                const codeToSSO = new Map();
+                filterMapping.forEach(item => {
+                    codeToProv.set(String(item.polling_station_code), String(item.province_code));
+                    codeToSSO.set(String(item.polling_station_code), String(item.sso_branch_code));
+                });
+
+                if (access.type === 'BKK_BRANCH') {
+                    filteredLogs = allLogs.filter(log => codeToSSO.get(String(log.polling_station_code)) === access.sso);
+                } else if (access.type === 'PROVINCE') {
+                    filteredLogs = allLogs.filter(log => codeToProv.get(String(log.polling_station_code)) === access.prov);
+                }
+            }
+
+            if (filteredLogs.length === 0) { txt.value = '-- ไม่มีประวัติการอัปเดตข้อมูลในพื้นที่ของคุณ'; return; }
+
+            // ประมวลผล Deduplication เพื่อหา Script ล่าสุดของแต่ละหน่วย
             const latestScriptsMap = new Map();
-            allLogs.forEach(log => latestScriptsMap.set(String(log.polling_station_code), log));
+            filteredLogs.forEach(log => latestScriptsMap.set(String(log.polling_station_code), log));
             const uniqueUpdates = Array.from(latestScriptsMap.values());
 
-            // สร้างโครงสร้าง Script
-            let sql = `-- ==========================================\n-- SSO Polling Station Update Script (Deduplicated)\n-- Generated at: ${new Date().toLocaleString('th-TH')}\n-- Total Unique Updates: ${uniqueUpdates.length} stations (Filtered from ${allLogs.length} logs)\n-- ==========================================\n\n`;
+            // สร้างข้อความ SQL
+            let sql = `-- ==========================================\n-- SSO Polling Station Update Script (Deduplicated)\n-- Generated at: ${new Date().toLocaleString('th-TH')}\n-- Total Unique Updates: ${uniqueUpdates.length} stations (Filtered from ${filteredLogs.length} logs)\n-- ==========================================\n\n`;
             
             uniqueUpdates.forEach(log => {
                 sql += `-- Update for Station: ${log.polling_station_code} (By: ${log.updated_by || 'Unknown'} on ${new Date(log.updated_at).toLocaleString('th-TH')})\n${log.sql_script}\n\n`;
@@ -821,7 +929,7 @@ function openExportModalFlow() {
 }
 
 // ==========================================
-// 12. ผูกปุ่ม Event Listener ทั้งหมด
+// 13. ผูกปุ่ม Event Listener ทั้งหมด
 // ==========================================
 window.addEventListener('DOMContentLoaded', () => {
     
@@ -837,9 +945,8 @@ window.addEventListener('DOMContentLoaded', () => {
     const btnClear = document.getElementById('btnClear');
     if(btnClear) {
         btnClear.addEventListener('click', () => {
-            document.getElementById('filterProvince').value = '';
-            document.getElementById('filterSSO').innerHTML = '<option value="">-- แสดงทุกสำนักงาน --</option>'; document.getElementById('filterSSO').disabled = true;
-            document.getElementById('filterAmphur').innerHTML = '<option value="">-- แสดงทุกอำเภอ --</option>'; document.getElementById('filterAmphur').disabled = true;
+            applyRoleBasedFilters('filter');
+            
             document.getElementById('searchInput').value = '';
             document.getElementById('dataTableBody').innerHTML = `<tr><td colspan="9" class="text-center py-20 text-slate-400">กรุณาเลือกเงื่อนไขและกดค้นหา</td></tr>`;
             document.getElementById('recordCount').innerText = 'พบข้อมูล 0 รายการ';
