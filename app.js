@@ -193,8 +193,9 @@ async function loadFilterOptions() {
     let allData = []; let from = 0; const step = 1000; let hasMore = true;
     try {
         while (hasMore) {
+            // [จุดอัปเดต] ดึง polling_station_code เข้ามาใน memory ด้วยเพื่อใช้ตอนกดดูประวัติ
             const { data, error } = await supabaseClient.from('ms_station_1')
-                .select('province_code, province_name, sso_branch_code, sso_name, amphur_code, amphur_name')
+                .select('polling_station_code, province_code, province_name, sso_branch_code, sso_name, amphur_code, amphur_name')
                 .order('province_code').order('sso_branch_code').order('amphur_code').range(from, from + step - 1);
             if (error) throw error;
             if (data && data.length > 0) { allData = allData.concat(data); from += step; if (data.length < step) hasMore = false; } else hasMore = false;
@@ -462,7 +463,7 @@ async function executeSaveData() {
 }
 
 // ==========================================
-// 10. ระบบ Export Excel (อัปเดตแกะข้อจำกัด 1000 แถว & เพิ่มคอลัมน์)
+// 10. ระบบ Export Excel 
 // ==========================================
 function openExcelModalFlow() {
     const pSel = document.getElementById('excelFilterProvince');
@@ -496,7 +497,6 @@ function openExcelModalFlow() {
         });
         exPSel.setAttribute('data-event-bound', 'true');
     }
-
     document.getElementById('exportExcelModal').classList.remove('hidden');
 }
 
@@ -509,7 +509,7 @@ async function executeExcelExport() {
         const s = document.getElementById('excelFilterSSO').value;
         const a = document.getElementById('excelFilterAmphur').value;
 
-        // ขั้นตอนที่ 1: ดึงประวัติ Logs ทั้งหมด (ใช้ Loop เพื่อป้องกันติด Limit 1000 แถว)
+        // 1. ดึงประวัติ Logs แบบ Loop (ปลอดภัยจากข้อจำกัด 1000 แถว)
         let allLogs = [];
         let logFrom = 0; const logStep = 1000; let logHasMore = true;
         while(logHasMore) {
@@ -519,11 +519,9 @@ async function executeExcelExport() {
             if (logs && logs.length > 0) { allLogs = allLogs.concat(logs); logFrom += logStep; if (logs.length < logStep) logHasMore = false; } else logHasMore = false;
         }
 
-        // ตัดข้อมูลซ้ำ (Deduplication) หาอัปเดตล่าสุด
+        // เก็บประวัติล่าสุด (Deduplication)
         const latestLogs = new Map();
-        allLogs.forEach(log => {
-            latestLogs.set(String(log.polling_station_code), log);
-        });
+        allLogs.forEach(log => { latestLogs.set(String(log.polling_station_code), log); });
 
         if (latestLogs.size === 0) {
             customAlert('ไม่พบข้อมูล', 'ไม่มีประวัติการแก้ไขข้อมูลสถานที่เลือกตั้งในระบบ', 'warning');
@@ -531,11 +529,11 @@ async function executeExcelExport() {
             return;
         }
 
-        // ขั้นตอนที่ 2: ดึงข้อมูล Master Stations ตามตัวกรอง (ใช้ Loop เช่นกัน)
+        // 2. ดึงข้อมูลตารางหลักแบบ Loop
         let allStations = [];
         let stFrom = 0; const stStep = 1000; let stHasMore = true;
         while (stHasMore) {
-            let q = supabaseClient.from('ms_station_1').select('polling_station_code, province_name, amphur_name, sso_name').range(stFrom, stFrom + stStep - 1);
+            let q = supabaseClient.from('ms_station_1').select('polling_station_code, province_code, province_name, amphur_code, amphur_name, sso_branch_code, sso_name').range(stFrom, stFrom + stStep - 1);
             if (p) q = q.eq('province_code', p);
             if (s) q = q.eq('sso_branch_code', s);
             if (a) q = q.eq('amphur_code', a);
@@ -545,11 +543,25 @@ async function executeExcelExport() {
             if (stations && stations.length > 0) { allStations = allStations.concat(stations); stFrom += stStep; if (stations.length < stStep) stHasMore = false; } else stHasMore = false;
         }
 
-        // ขั้นตอนที่ 3: จับคู่ข้อมูลและสร้างโครงสร้าง Excel (แบบมี [เดิม] และ [ใหม่])
+        // 3. จัดเรียงข้อมูล (Sorting) ตามลำดับ: สปส. -> จังหวัด -> อำเภอ -> รหัสหน่วย
+        allStations.sort((a, b) => {
+            const ssoA = String(a.sso_branch_code || ''); const ssoB = String(b.sso_branch_code || '');
+            if (ssoA !== ssoB) return ssoA.localeCompare(ssoB);
+            
+            const provA = String(a.province_code || ''); const provB = String(b.province_code || '');
+            if (provA !== provB) return provA.localeCompare(provB);
+            
+            const ampA = String(a.amphur_code || ''); const ampB = String(b.amphur_code || '');
+            if (ampA !== ampB) return ampA.localeCompare(ampB);
+            
+            const pollA = Number(a.polling_station_code) || 0; const pollB = Number(b.polling_station_code) || 0;
+            return pollA - pollB; 
+        });
+
+        // 4. ประกอบร่างข้อมูล
         const excelData = [];
         allStations.forEach(st => {
             const codeStr = String(st.polling_station_code);
-            
             if (latestLogs.has(codeStr)) {
                 const log = latestLogs.get(codeStr);
                 const dStr = new Date(log.updated_at).toLocaleString('th-TH');
@@ -583,19 +595,14 @@ async function executeExcelExport() {
             return;
         }
 
-        // ขั้นตอนที่ 4: ใช้ SheetJS สร้างไฟล์ Excel
+        // 5. สร้างไฟล์ Excel
         const worksheet = XLSX.utils.json_to_sheet(excelData);
-        
-        // ปรับความกว้างคอลัมน์ให้อ่านง่าย
         const wscols = [
             {wch: 15}, {wch: 25}, {wch: 15}, {wch: 12}, 
-            {wch: 30}, {wch: 30}, // ชื่อ
-            {wch: 25}, {wch: 25}, // ที่เลือกตั้ง
-            {wch: 25}, {wch: 25}, // ที่อยู่
-            {wch: 15}, {wch: 15}, // ตำบล
-            {wch: 12}, {wch: 12}, // ไปรษณีย์
-            {wch: 35}, {wch: 35}, // URL
-            {wch: 20}, {wch: 20}  // ผู้แก้/เวลา
+            {wch: 30}, {wch: 30}, {wch: 25}, {wch: 25}, 
+            {wch: 25}, {wch: 25}, {wch: 15}, {wch: 15}, 
+            {wch: 12}, {wch: 12}, {wch: 35}, {wch: 35}, 
+            {wch: 20}, {wch: 20} 
         ];
         worksheet['!cols'] = wscols;
 
@@ -617,18 +624,40 @@ async function executeExcelExport() {
 }
 
 // ==========================================
-// 11. ประวัติ และ Export Script (SQL)
+// 11. ประวัติ (หน้าต่าง Modal Filter ระดับจังหวัด)
 // ==========================================
 async function openHistoryModal() {
     document.getElementById('historyModal').classList.remove('hidden');
     const tb = document.getElementById('historyTableBody');
     tb.innerHTML = `<tr><td colspan="4" class="text-center py-4">กำลังโหลด...</td></tr>`;
 
-    const { data, error } = await supabaseClient.from('station_update_logs').select('*').order('updated_at', { ascending: false }).limit(50);
+    // เช็คค่าจังหวัดที่ถูกเลือกอยู่ในขณะนั้น
+    const p = document.getElementById('filterProvince').value;
+    let provNameText = p ? `เฉพาะจังหวัดที่เลือก` : `ทั่วประเทศ`;
+
+    // โหลดประวัติมาเผื่อไว้กรองใน Memory (2000 แถว) ป้องกันการพลาดข้อมูล
+    const { data, error } = await supabaseClient.from('station_update_logs').select('*').order('updated_at', { ascending: false }).limit(2000);
     if (error || !data) { tb.innerHTML = `<tr><td colspan="4" class="text-center py-4 text-red-500">โหลดประวัติล้มเหลว</td></tr>`; return; }
 
+    let filteredLogs = data;
+
+    // ถ้ามีการเลือกจังหวัด ให้กรองประวัติเอาเฉพาะรหัสหน่วยที่อยู่ในจังหวัดนั้น
+    if (p) {
+        const codeToProv = new Map();
+        filterMapping.forEach(item => codeToProv.set(String(item.polling_station_code), String(item.province_code)));
+        filteredLogs = data.filter(log => codeToProv.get(String(log.polling_station_code)) === p);
+    }
+
+    // ตัดเอาเฉพาะ 50 รายการล่าสุดของจังหวัดนั้น
+    filteredLogs = filteredLogs.slice(0, 50);
     tb.innerHTML = '';
-    data.forEach(log => {
+
+    if (filteredLogs.length === 0) {
+        tb.innerHTML = `<tr><td colspan="4" class="text-center py-8 text-slate-500">ไม่พบประวัติการแก้ไข (${provNameText})</td></tr>`;
+        return;
+    }
+
+    filteredLogs.forEach(log => {
         const dStr = new Date(log.updated_at).toLocaleString('th-TH');
         let oldAddressFull = `${log.old_address || '-'} ต.${log.old_tambol_name || '-'} ${log.old_postal_code || '-'}`;
         if(oldAddressFull === '- ต.- -') oldAddressFull = '-';
@@ -709,7 +738,6 @@ window.addEventListener('DOMContentLoaded', () => {
     const btnHistory = document.getElementById('btnHistory'); if(btnHistory) btnHistory.addEventListener('click', openHistoryModal);
     const btnExport = document.getElementById('btnExport'); if(btnExport) btnExport.addEventListener('click', openExportModalFlow);
 
-    // ปุ่ม Export Excel
     const btnOpenExportExcel = document.getElementById('btnOpenExportExcel'); if(btnOpenExportExcel) btnOpenExportExcel.addEventListener('click', openExcelModalFlow);
     const btnExecuteExcel = document.getElementById('btnExecuteExcel'); if(btnExecuteExcel) btnExecuteExcel.addEventListener('click', executeExcelExport);
 
